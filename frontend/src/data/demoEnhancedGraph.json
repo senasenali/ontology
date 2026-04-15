@@ -1,0 +1,865 @@
+{
+  "nodes": [
+    {
+      "name": "新能源整车",
+      "node_code": "10001000000000000",
+      "level": 0,
+      "position": "中游",
+      "children": [],
+      "company": [
+        {
+          "name": "比亚迪",
+          "comcode": "299644",
+          "type": "上市公司",
+          "entity_id": "91440300192317458F",
+          "role": "核心厂商"
+        },
+        {
+          "name": "特斯拉",
+          "comcode": "1776435",
+          "type": "上市公司",
+          "entity_id": "91310115MA1H9YGWXX",
+          "role": "核心厂商"
+        },
+        {
+          "name": "蔚来",
+          "comcode": "5209493",
+          "type": "上市公司",
+          "entity_id": "91220322MACA4WXA90",
+          "role": "核心厂商"
+        },
+        {
+          "name": "小鹏汽车",
+          "comcode": "8036928",
+          "type": "上市公司",
+          "entity_id": "91440101MA5ANXEF2F",
+          "role": "核心厂商"
+        },
+        {
+          "name": "理想汽车",
+          "comcode": "8012069",
+          "type": "上市公司",
+          "entity_id": "91411723MA47J3H19R",
+          "role": "核心厂商"
+        },
+        {
+          "name": "上汽集团",
+          "comcode": "285755",
+          "type": "上市公司",
+          "entity_id": null,
+          "role": "核心厂商"
+        },
+        {
+          "name": "广汽集团",
+          "comcode": "350936",
+          "type": "上市公司",
+          "entity_id": null,
+          "role": "核心厂商"
+        },
+        {
+          "name": "吉利汽车",
+          "comcode": "351942",
+          "type": "上市公司",
+          "entity_id": "91371726690620687G",
+          "role": "核心厂商"
+        }
+      ],
+      "relations": [
+        {
+          "to_node_code": "10005040000000000",
+          "to_node_name": "充电桩运营",
+          "relation_type": "使用场景驱动",
+          "direction": "out",
+          "weight": 0.55,
+          "impact_logic": "补能便利性提升会增强新能源汽车消费意愿与使用体验"
+        },
+        {
+          "to_node_code": "10002102500000000",
+          "to_node_name": "车联网",
+          "relation_type": "智能化配套需求",
+          "direction": "in",
+          "weight": 0.7,
+          "impact_logic": "整车智能化升级会拉动车联网与通信模组需求"
+        },
+        {
+          "to_node_code": "10002110101000000",
+          "to_node_name": "电芯",
+          "relation_type": "核心部件依赖",
+          "direction": "in",
+          "weight": 0.95,
+          "impact_logic": "整车销量变化会强传导至动力电池电芯环节"
+        },
+        {
+          "to_node_code": "10002102100000000",
+          "to_node_name": "连接器",
+          "relation_type": "零部件配套",
+          "direction": "in",
+          "weight": 0.6,
+          "impact_logic": "整车产量变化带动连接器配套需求"
+        },
+        {
+          "to_node_code": "10002110102000000",
+          "to_node_name": "线束/连接器",
+          "relation_type": "高压配套",
+          "direction": "in",
+          "weight": 0.72,
+          "impact_logic": "高压平台与充电系统升级会拉动线束和高压连接器需求"
+        }
+      ]
+    },
+    {
+      "name": "充电桩",
+      "node_code": "10005000000000000",
+      "level": 0,
+      "position": "下游",
+      "children": [
+        {
+          "name": "充电桩制造",
+          "node_code": "10005060000000000",
+          "level": 1,
+          "children": [],
+          "company": [
+            {
+              "name": "特锐德",
+              "comcode": "364526",
+              "type": "上市公司",
+              "entity_id": "91371326MABMMRYB76",
+              "role": "核心厂商"
+            },
+            {
+              "name": "国电南瑞",
+              "comcode": "317081",
+              "type": "上市公司",
+              "entity_id": "91310000132772715Q",
+              "role": "核心厂商"
+            },
+            {
+              "name": "科士达",
+              "comcode": "456392",
+              "type": "上市公司",
+              "entity_id": "91330703MA2GA7J85A",
+              "role": "核心厂商"
+            },
+            {
+              "name": "道通科技",
+              "comcode": "2481320",
+              "type": "上市公司",
+              "entity_id": "91210123MA10LLY079",
+              "role": "核心厂商"
+            },
+            {
+              "name": "华为",
+              "comcode": "349065",
+              "type": "上市公司",
+              "entity_id": "914403001922038216",
+              "role": "核心厂商"
+            },
+            {
+              "name": "特斯拉",
+              "comcode": "1776435",
+              "type": "上市公司",
+              "entity_id": "91310115MA1H9YGWXX",
+              "role": "核心厂商"
+            },
+            {
+              "name": "蔚来",
+              "comcode": "4159808",
+              "type": "上市公司",
+              "entity_id": "91310000329555773R",
+              "role": "核心厂商"
+            },
+            {
+              "name": "小鹏汽车",
+              "comcode": "4226813",
+              "type": "上市公司",
+              "entity_id": "91440116MA59CU773U",
+              "role": "核心厂商"
+            }
+          ],
+          "relations": [
+            {
+              "to_node_code": "10005040000000000",
+              "to_node_name": "充电桩运营",
+              "relation_type": "设备供给",
+              "direction": "out",
+              "weight": 0.85,
+              "impact_logic": "运营侧扩张会向上拉动设备采购需求"
+            },
+            {
+              "to_node_code": "10001000000000000",
+              "to_node_name": "新能源整车",
+              "relation_type": "生态协同",
+              "direction": "out",
+              "weight": 0.5,
+              "impact_logic": "整车厂自建或合作充电网络会反向促进补能生态完善"
+            },
+            {
+              "to_node_code": "10002110102000000",
+              "to_node_name": "线束/连接器",
+              "relation_type": "硬件依赖",
+              "direction": "in",
+              "weight": 0.7,
+              "impact_logic": "充电设备制造依赖高压连接器与线束"
+            },
+            {
+              "to_node_code": "10002102100000000",
+              "to_node_name": "连接器",
+              "relation_type": "硬件依赖",
+              "direction": "in",
+              "weight": 0.65,
+              "impact_logic": "充电模块与控制单元需要连接器配套"
+            },
+            {
+              "to_node_code": "10002110101000000",
+              "to_node_name": "电芯",
+              "relation_type": "储能/备电关联",
+              "direction": "in",
+              "weight": 0.35,
+              "impact_logic": "部分充电场站及设备配套储能系统，对电芯形成间接需求"
+            }
+          ]
+        },
+        {
+          "name": "充电桩运营",
+          "node_code": "10005040000000000",
+          "level": 1,
+          "children": [],
+          "company": [
+            {
+              "name": "特来电",
+              "comcode": "2166453",
+              "type": "上市公司",
+              "entity_id": "91370222395815801F",
+              "role": "核心厂商"
+            },
+            {
+              "name": "星星充电",
+              "comcode": "4953583",
+              "type": "上市公司",
+              "entity_id": null,
+              "role": "核心厂商"
+            },
+            {
+              "name": "国家电网",
+              "comcode": "282093",
+              "type": "上市公司",
+              "entity_id": "9111000071093123XX",
+              "role": "核心厂商"
+            },
+            {
+              "name": "南方电网",
+              "comcode": "293324",
+              "type": "上市公司",
+              "entity_id": "91440000190478709T",
+              "role": "核心厂商"
+            },
+            {
+              "name": "特锐德",
+              "comcode": null,
+              "type": "上市公司",
+              "entity_id": "9137020075693361XY",
+              "role": "核心厂商"
+            },
+            {
+              "name": "蔚来",
+              "comcode": "4159808",
+              "type": "上市公司",
+              "entity_id": "91310000329555773R",
+              "role": "核心厂商"
+            },
+            {
+              "name": "小鹏汽车",
+              "comcode": "4226813",
+              "type": "上市公司",
+              "entity_id": "91440116MA59CU773U",
+              "role": "核心厂商"
+            },
+            {
+              "name": "特斯拉",
+              "comcode": "1776435",
+              "type": "上市公司",
+              "entity_id": null,
+              "role": "核心厂商"
+            }
+          ],
+          "relations": [
+            {
+              "to_node_code": "10005060000000000",
+              "to_node_name": "充电桩制造",
+              "relation_type": "设备采购需求",
+              "direction": "out",
+              "weight": 0.85,
+              "impact_logic": "运营商建站扩容会直接带动充电设备采购"
+            },
+            {
+              "to_node_code": "10001000000000000",
+              "to_node_name": "新能源整车",
+              "relation_type": "补能便利提升",
+              "direction": "out",
+              "weight": 0.6,
+              "impact_logic": "补能网络完善会降低购车和用车焦虑，促进整车渗透"
+            },
+            {
+              "to_node_code": "10002110102000000",
+              "to_node_name": "线束/连接器",
+              "relation_type": "扩容带动配套",
+              "direction": "out",
+              "weight": 0.45,
+              "impact_logic": "场站扩容和快充升级会带动高压部件需求"
+            }
+          ]
+        }
+      ],
+      "relations": [
+        {
+          "to_node_code": "10005060000000000",
+          "to_node_name": "充电桩制造",
+          "relation_type": "政策驱动设备建设",
+          "direction": "out",
+          "weight": 0.9,
+          "impact_logic": "政策支持充电基础设施建设将首先拉动充电设备制造与交付需求"
+        },
+        {
+          "to_node_code": "10005040000000000",
+          "to_node_name": "充电桩运营",
+          "relation_type": "政策驱动网络扩张",
+          "direction": "out",
+          "weight": 0.92,
+          "impact_logic": "政策支持将推动充电站点建设与运营网络扩容"
+        },
+        {
+          "to_node_code": "10001000000000000",
+          "to_node_name": "新能源整车",
+          "relation_type": "补能基础设施完善",
+          "direction": "out",
+          "weight": 0.68,
+          "impact_logic": "补能网络完善会降低续航焦虑并促进新能源汽车消费"
+        }
+      ]
+    },
+    {
+      "name": "汽车零部件",
+      "node_code": "10002000000000000",
+      "level": 0,
+      "position": "上游",
+      "children": [
+        {
+          "name": "动力系统",
+          "node_code": "10002110000000000",
+          "level": 1,
+          "children": [
+            {
+              "name": "电池",
+              "node_code": "10002110100000000",
+              "level": 2,
+              "children": [
+                {
+                  "name": "电芯",
+                  "node_code": "10002110101000000",
+                  "level": 3,
+                  "children": [],
+                  "company": [
+                    {
+                      "name": "亿纬锂能",
+                      "comcode": "73415464",
+                      "type": "上市公司",
+                      "entity_id": "91110106MAEBFUT273",
+                      "role": "核心厂商"
+                    },
+                    {
+                      "name": "国轩高科",
+                      "comcode": "351531",
+                      "type": "上市公司",
+                      "entity_id": "91320600138346792B",
+                      "role": "核心厂商"
+                    },
+                    {
+                      "name": "宁德时代",
+                      "comcode": "2915384",
+                      "type": "上市公司",
+                      "entity_id": "91350900MA33F5967F",
+                      "role": "核心厂商",
+                      "instance_relations": [
+                        {
+                          "target_name": "中恒电气",
+                          "target_comcode": "358148",
+                          "target_entity_id": "913300002539163407",
+                          "link_type": "战略合作",
+                          "status": "NEW",
+                          "writeback_status": "待写入"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "比亚迪",
+                      "comcode": "299644",
+                      "type": "上市公司",
+                      "entity_id": "91440300192317458F",
+                      "role": "核心厂商"
+                    },
+                    {
+                      "name": "湖南裕能",
+                      "comcode": "2878200",
+                      "type": "上市公司",
+                      "entity_id": "91431381MABWCHN47Y",
+                      "role": "核心厂商"
+                    }
+                  ],
+                  "relations": [
+                    {
+                      "to_node_code": "10002110100000000",
+                      "to_node_name": "电池",
+                      "relation_type": "cost_impact",
+                      "direction": "out",
+                      "weight": 0.9,
+                      "impact_logic": "电芯价格与原材料成本变化会向动力电池系统传导"
+                    },
+                    {
+                      "to_node_code": "10001000000000000",
+                      "to_node_name": "新能源整车",
+                      "relation_type": "核心供给",
+                      "direction": "out",
+                      "weight": 0.95,
+                      "impact_logic": "电芯成本、性能和供给决定整车产能与竞争力"
+                    },
+                    {
+                      "to_node_code": "10005060000000000",
+                      "to_node_name": "充电桩制造",
+                      "relation_type": "储能协同",
+                      "direction": "out",
+                      "weight": 0.35,
+                      "impact_logic": "储能型充电场景会增加对电芯的间接需求"
+                    }
+                  ]
+                },
+                {
+                  "name": "线束/连接器",
+                  "node_code": "10002110102000000",
+                  "level": 3,
+                  "children": [],
+                  "company": [
+                    {
+                      "name": "永贵电器",
+                      "comcode": "863009",
+                      "type": "上市公司",
+                      "entity_id": "91510703569712563R",
+                      "role": "核心厂商"
+                    },
+                    {
+                      "name": "中航光电",
+                      "comcode": "283847",
+                      "type": "上市公司",
+                      "entity_id": "91621002MA72M0GW5T",
+                      "role": "核心厂商"
+                    },
+                    {
+                      "name": "泰科电子",
+                      "comcode": "1321064",
+                      "type": "上市公司",
+                      "entity_id": null,
+                      "role": "核心厂商"
+                    },
+                    {
+                      "name": "胜蓝股份",
+                      "comcode": "2957371",
+                      "type": "上市公司",
+                      "entity_id": null,
+                      "role": "核心厂商"
+                    },
+                    {
+                      "name": "壹连科技",
+                      "comcode": "2847643",
+                      "type": "上市公司",
+                      "entity_id": "91310114MACA5FNQ5R",
+                      "role": "核心厂商"
+                    }
+                  ],
+                  "relations": [
+                    {
+                      "to_node_code": "10001000000000000",
+                      "to_node_name": "新能源整车",
+                      "relation_type": "高压配套供给",
+                      "direction": "out",
+                      "weight": 0.72,
+                      "impact_logic": "高压线束和连接器是整车三电与补能系统的重要配套"
+                    },
+                    {
+                      "to_node_code": "10005060000000000",
+                      "to_node_name": "充电桩制造",
+                      "relation_type": "充电设备配套",
+                      "direction": "out",
+                      "weight": 0.7,
+                      "impact_logic": "充电枪、充电模块和桩体系统需要高压线束与连接器"
+                    }
+                  ]
+                },
+                {
+                  "name": "正极材料",
+                  "node_code": "10002110103000000",
+                  "level": 3,
+                  "children": [
+                    {
+                      "name": "碳酸锂",
+                      "node_code": "10002110103010000",
+                      "level": 4,
+                      "children": [],
+                      "company": [
+                        {
+                          "name": "赣锋锂业",
+                          "comcode": "381752",
+                          "type": "上市公司",
+                          "entity_id": "91360500716575125F",
+                          "role": "核心厂商"
+                        },
+                        {
+                          "name": "天齐锂业",
+                          "comcode": "383094",
+                          "type": "上市公司",
+                          "entity_id": "91510900206360802D",
+                          "role": "核心厂商"
+                        }
+                      ],
+                      "relations": [
+                        {
+                          "to_node_code": "10002110103000000",
+                          "to_node_name": "正极材料",
+                          "relation_type": "raw_material_for",
+                          "direction": "out",
+                          "weight": 0.96,
+                          "impact_logic": "碳酸锂价格变化会直接影响正极材料的原料成本"
+                        },
+                        {
+                          "to_node_code": "10002110104000000",
+                          "to_node_name": "电池电解液",
+                          "relation_type": "raw_material_for",
+                          "direction": "out",
+                          "weight": 0.72,
+                          "impact_logic": "锂盐价格波动会间接传导至电解液等锂电材料环节"
+                        }
+                      ]
+                    }
+                  ],
+                  "company": [
+                    {
+                      "name": "德方纳米",
+                      "comcode": "516068",
+                      "type": "上市公司",
+                      "entity_id": "91440300797999551E",
+                      "role": "核心厂商"
+                    },
+                    {
+                      "name": "容百科技",
+                      "comcode": "5387845",
+                      "type": "上市公司",
+                      "entity_id": null,
+                      "role": "核心厂商"
+                    }
+                  ],
+                  "relations": [
+                    {
+                      "to_node_code": "10002110101000000",
+                      "to_node_name": "电芯",
+                      "relation_type": "component_of",
+                      "direction": "out",
+                      "weight": 0.9,
+                      "impact_logic": "正极材料成本变化会向电芯制造环节传导"
+                    }
+                  ]
+                },
+                {
+                  "name": "电池电解液",
+                  "node_code": "10002110104000000",
+                  "level": 3,
+                  "children": [],
+                  "company": [
+                    {
+                      "name": "天赐材料",
+                      "comcode": "471219",
+                      "type": "上市公司",
+                      "entity_id": "91440101723773883M",
+                      "role": "核心厂商"
+                    },
+                    {
+                      "name": "新宙邦",
+                      "comcode": "361948",
+                      "type": "上市公司",
+                      "entity_id": "91420581MABYFGMJ9W",
+                      "role": "核心厂商"
+                    }
+                  ],
+                  "relations": [
+                    {
+                      "to_node_code": "10002110101000000",
+                      "to_node_name": "电芯",
+                      "relation_type": "component_of",
+                      "direction": "out",
+                      "weight": 0.86,
+                      "impact_logic": "电解液成本变化会向电芯制造环节传导"
+                    }
+                  ]
+                }
+              ],
+              "relations": [
+                {
+                  "to_node_code": "10001000000000000",
+                  "to_node_name": "新能源整车",
+                  "relation_type": "cost_impact",
+                  "direction": "out",
+                  "weight": 0.88,
+                  "impact_logic": "动力电池成本变化会进一步影响新能源整车的成本与盈利预期"
+                }
+              ],
+              "company": [
+                {
+                  "name": "宁德时代",
+                  "comcode": "2915384",
+                  "type": "上市公司",
+                  "entity_id": "91350900MA33F5967F",
+                  "role": "核心厂商",
+                  "instance_relations": [
+                    {
+                      "target_name": "中恒电气",
+                      "target_comcode": "358148",
+                      "target_entity_id": "913300002539163407",
+                      "link_type": "战略合作",
+                      "status": "NEW",
+                      "writeback_status": "待写入"
+                    }
+                  ]
+                },
+                {
+                  "name": "弗迪电池",
+                  "comcode": "8318285",
+                  "type": "上市公司",
+                  "entity_id": "91500120MA619YL986",
+                  "role": "核心厂商"
+                }
+              ]
+            }
+          ],
+          "relations": []
+        },
+        {
+          "name": "电子电气系统",
+          "node_code": "10002100000000000",
+          "level": 1,
+          "children": [
+            {
+              "name": "车联网",
+              "node_code": "10002102500000000",
+              "level": 2,
+              "children": [],
+              "company": [
+                {
+                  "name": "华为",
+                  "comcode": "349065",
+                  "type": "上市公司",
+                  "entity_id": null,
+                  "role": "核心厂商"
+                },
+                {
+                  "name": "德赛西威",
+                  "comcode": "1730557",
+                  "type": "上市公司",
+                  "entity_id": "91510100MA6CBUP858",
+                  "role": "核心厂商"
+                },
+                {
+                  "name": "均胜电子",
+                  "comcode": "285488",
+                  "type": "上市公司",
+                  "entity_id": "9144132233789971X8",
+                  "role": "核心厂商"
+                },
+                {
+                  "name": "移远通信",
+                  "comcode": "2475253",
+                  "type": "上市公司",
+                  "entity_id": "91340100MA2TUGE898",
+                  "role": "核心厂商"
+                },
+                {
+                  "name": "广和通",
+                  "comcode": "2481322",
+                  "type": "上市公司",
+                  "entity_id": "91370202MA940XA43Q",
+                  "role": "核心厂商"
+                }
+              ],
+              "relations": [
+                {
+                  "to_node_code": "10001000000000000",
+                  "to_node_name": "新能源整车",
+                  "relation_type": "智能化功能供给",
+                  "direction": "out",
+                  "weight": 0.7,
+                  "impact_logic": "车联网能力提升可增强整车智能座舱与远程服务体验"
+                }
+              ]
+            },
+            {
+              "name": "连接器",
+              "node_code": "10002102100000000",
+              "level": 2,
+              "children": [],
+              "company": [
+                {
+                  "name": "立讯精密",
+                  "comcode": "356828",
+                  "type": "上市公司",
+                  "entity_id": "91320481MA21CXN97B",
+                  "role": "核心厂商"
+                },
+                {
+                  "name": "中航光电",
+                  "comcode": "283847",
+                  "type": "上市公司",
+                  "entity_id": "91621002MA72M0GW5T",
+                  "role": "核心厂商"
+                },
+                {
+                  "name": "泰科电子",
+                  "comcode": "1321064",
+                  "type": "上市公司",
+                  "entity_id": null,
+                  "role": "核心厂商"
+                },
+                {
+                  "name": "安费诺",
+                  "comcode": null,
+                  "type": "上市公司",
+                  "entity_id": null,
+                  "role": "核心厂商"
+                },
+                {
+                  "name": "永贵电器",
+                  "comcode": "863009",
+                  "type": "上市公司",
+                  "entity_id": "91510703569712563R",
+                  "role": "核心厂商"
+                }
+              ],
+              "relations": [
+                {
+                  "to_node_code": "10001000000000000",
+                  "to_node_name": "新能源整车",
+                  "relation_type": "电子系统配套",
+                  "direction": "out",
+                  "weight": 0.6,
+                  "impact_logic": "电子电气架构升级会提升连接器价值量"
+                },
+                {
+                  "to_node_code": "10005060000000000",
+                  "to_node_name": "充电桩制造",
+                  "relation_type": "设备电子配套",
+                  "direction": "out",
+                  "weight": 0.65,
+                  "impact_logic": "充电桩控制系统和功率模块需要连接器支持"
+                }
+              ]
+            }
+          ],
+          "relations": []
+        }
+      ],
+      "relations": []
+    },
+    {
+      "name": "后市场",
+      "node_code": "10004000000000000",
+      "level": 0,
+      "position": "下游",
+      "children": [
+        {
+          "name": "汽车保险",
+          "node_code": "10004080000000000",
+          "level": 1,
+          "children": [],
+          "company": [
+            {
+              "name": "中国太保",
+              "comcode": "603723",
+              "type": "上市公司",
+              "entity_id": "91310000132211707B",
+              "role": "核心厂商"
+            },
+            {
+              "name": "中国人保",
+              "comcode": "481204",
+              "type": "上市公司",
+              "entity_id": "911000001000237368",
+              "role": "核心厂商"
+            },
+            {
+              "name": "中国人寿",
+              "comcode": "536442",
+              "type": "上市公司",
+              "entity_id": "91100000100023728D",
+              "role": "核心厂商"
+            },
+            {
+              "name": "新华保险",
+              "comcode": "1326005",
+              "type": "上市公司",
+              "entity_id": "911100001000238753",
+              "role": "核心厂商"
+            },
+            {
+              "name": "众诚保险",
+              "comcode": "606026",
+              "type": "上市公司",
+              "entity_id": "91440101576023985Y",
+              "role": "核心厂商"
+            }
+          ],
+          "relations": []
+        },
+        {
+          "name": "报废回收",
+          "node_code": "10004070000000000",
+          "level": 1,
+          "children": [],
+          "company": [
+            {
+              "name": "格林美",
+              "comcode": "363331",
+              "type": "上市公司",
+              "entity_id": null,
+              "role": "核心厂商"
+            },
+            {
+              "name": "华宏科技",
+              "comcode": "838026",
+              "type": "上市公司",
+              "entity_id": null,
+              "role": "核心厂商"
+            },
+            {
+              "name": "天奇股份",
+              "comcode": "339079",
+              "type": "上市公司",
+              "entity_id": null,
+              "role": "核心厂商"
+            },
+            {
+              "name": "超越科技",
+              "comcode": "7914362",
+              "type": "上市公司",
+              "entity_id": "91440300MA5HU49B32",
+              "role": "核心厂商"
+            },
+            {
+              "name": "东江环保",
+              "comcode": "610820",
+              "type": "上市公司",
+              "entity_id": null,
+              "role": "核心厂商"
+            }
+          ],
+          "relations": []
+        }
+      ],
+      "relations": []
+    }
+  ]
+}

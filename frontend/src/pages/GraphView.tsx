@@ -418,7 +418,6 @@ export function GraphView({ data, onUpdate }: { data: OntologyData; onUpdate?: (
                       "text-white text-xs font-medium",
                       "shadow-lg hover:shadow-xl hover:scale-105",
                       "transition-all duration-300",
-                      "animate-pulse hover:animate-none",
                       "group relative"
                     )}
                   >

@@ -144,7 +144,7 @@ function AppContent() {
         } />
         <Route path="/actions" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
-            <ActionTypes data={ontology} onUpdate={setOntology} />
+            <ActionTypes />
           </PageWrapper>
         } />
         <Route path="/rules" element={

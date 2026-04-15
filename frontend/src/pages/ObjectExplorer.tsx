@@ -84,7 +84,7 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
   const [selectedInstance, setSelectedInstance] = useState<ObjectInstance | null>(null);
   const [propertyStats, setPropertyStats] = useState<PropertyStats[]>([]);
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
-  const [viewMode, setViewMode] = useState<'overview' | 'instances' | 'graph'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'graph'>('overview');
   
   // 图谱相关状态
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; links: GraphLink[] } | null>(null);
@@ -101,11 +101,13 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
       const instanceData = result.data || [];
       const objectTypeFromApi = result.objectType;
       setInstances(instanceData);
-      calculatePropertyStats(instanceData, objectTypeFromApi, objectTypeId);
+      const stats = calculatePropertyStats(instanceData, objectTypeFromApi, objectTypeId);
+      setSelectedProperty(stats[0]?.property || null);
     } catch (error: any) {
       toast.error(`获取实例数据失败: ${error.message}`);
       setInstances([]);
       setPropertyStats([]);
+      setSelectedProperty(null);
     } finally {
       setLoading(false);
     }
@@ -113,16 +115,19 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
 
   // 计算属性维度统计
   const calculatePropertyStats = (instanceData: ObjectInstance[], objectTypeFromApi?: any, objectTypeId?: string) => {
-    if (!instanceData.length) return;
+    if (!instanceData.length) {
+      setPropertyStats([]);
+      return [] as PropertyStats[];
+    }
     
     const currentObjectTypeId = objectTypeId || selectedObjectType;
-    if (!currentObjectTypeId) return;
+    if (!currentObjectTypeId) return [] as PropertyStats[];
     
     // 优先使用 API 返回的 objectType（属性 ID 与数据匹配）
     const properties = objectTypeFromApi?.properties || 
                        data.objectTypes.find(ot => ot.id === currentObjectTypeId)?.properties || [];
     
-    if (!properties.length) return;
+    if (!properties.length) return [] as PropertyStats[];
 
     const stats: PropertyStats[] = properties.map((prop: any) => {
       const values = instanceData.map(item => item[prop.id]);
@@ -155,6 +160,7 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
     });
     
     setPropertyStats(stats);
+    return stats;
   };
 
   // 过滤实例
@@ -427,7 +433,7 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
       </div>
 
       <div className="flex gap-6 flex-1 min-h-0">
-        {/* Left Panel - Object Type Selector & Property Stats */}
+        {/* Left Panel - Object Type Selector & Instance List */}
         <div className="w-2/5 flex flex-col gap-4 min-h-0">
           {/* Object Type Selector */}
           <Card>
@@ -464,25 +470,24 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
             </CardContent>
           </Card>
 
-          {/* Property Dimension Stats */}
+          {/* Instance List */}
           {selectedObjectType && (
             <Card className="flex-1 flex flex-col min-h-0">
               <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <PieChart className="w-4 h-4" />
-                    属性维度统计
-                    <Badge variant="secondary">{propertyStats.length} 个属性</Badge>
-                  </CardTitle>
-                  <div className="flex gap-2">
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => fetchInstances(selectedObjectType)}
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                    </Button>
-                  </div>
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Table className="w-4 h-4" />
+                  实例列表
+                  <Badge variant="secondary">{filteredInstances.length}</Badge>
+                </CardTitle>
+                
+                <div className="relative mt-2">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    placeholder="搜索实例..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9"
+                  />
                 </div>
               </CardHeader>
               <CardContent className="flex-1 overflow-auto p-0">
@@ -490,80 +495,40 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
                   <div className="flex items-center justify-center h-32">
                     <RefreshCw className="w-5 h-5 animate-spin text-slate-400" />
                   </div>
-                ) : propertyStats.length === 0 ? (
+                ) : filteredInstances.length === 0 ? (
                   <div className="text-center py-8 text-slate-500">
                     <Database className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p>暂无统计数据</p>
+                    <p>暂无实例数据</p>
                   </div>
                 ) : (
                   <div className="divide-y">
-                    {propertyStats.map((stat) => {
-                      const Icon = getPropertyIcon(stat.property.type);
-                      return (
-                        <div
-                          key={stat.property.id}
-                          className={cn(
-                            "px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer",
-                            selectedProperty?.id === stat.property.id && "bg-blue-50 hover:bg-blue-50"
-                          )}
-                          onClick={() => {
-                            setSelectedProperty(stat.property);
-                            setViewMode('instances');
-                          }}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <Icon className="w-4 h-4 text-slate-400" />
-                              <span className="font-medium text-sm">{stat.property.name}</span>
-                            </div>
-                            <Badge variant="outline" className="text-xs">
-                              {stat.property.type || 'string'}
-                            </Badge>
+                    {filteredInstances.map((instance, index) => (
+                      <button
+                        key={index}
+                        onClick={() => {
+                          setSelectedInstance(instance);
+                          setViewMode('graph');
+                        }}
+                        className={cn(
+                          "w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors",
+                          selectedInstance === instance && "bg-blue-50 hover:bg-blue-50"
+                        )}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="font-medium text-sm truncate">
+                            {primaryKeyProp ? instance[primaryKeyProp.id] : `实例 #${index + 1}`}
                           </div>
-                          
-                          {/* Stats Summary */}
-                          <div className="grid grid-cols-3 gap-2 text-xs mb-2">
-                            <div className="bg-slate-50 rounded px-2 py-1 text-center">
-                              <div className="font-semibold text-blue-600">{stat.totalCount}</div>
-                              <div className="text-slate-400">总数</div>
-                            </div>
-                            <div className="bg-slate-50 rounded px-2 py-1 text-center">
-                              <div className="font-semibold text-emerald-600">{stat.uniqueCount}</div>
-                              <div className="text-slate-400">唯一值</div>
-                            </div>
-                            <div className="bg-slate-50 rounded px-2 py-1 text-center">
-                              <div className="font-semibold text-amber-600">{stat.nullCount}</div>
-                              <div className="text-slate-400">空值</div>
-                            </div>
-                          </div>
-
-                          {/* Value Distribution Preview */}
-                          {stat.valueDistribution.length > 0 && (
-                            <div className="space-y-1">
-                              {stat.valueDistribution.slice(0, 3).map((item, idx) => (
-                                <div key={idx} className="flex items-center gap-2 text-xs">
-                                  <div className="flex-1 truncate text-slate-600" title={item.value}>
-                                    {item.value}
-                                  </div>
-                                  <div className="w-16 bg-slate-100 rounded-full h-1.5">
-                                    <div 
-                                      className="bg-blue-500 h-1.5 rounded-full"
-                                      style={{ width: `${item.percentage}%` }}
-                                    />
-                                  </div>
-                                  <span className="text-slate-400 w-8 text-right">{item.count}</span>
-                                </div>
-                              ))}
-                              {stat.valueDistribution.length > 3 && (
-                                <div className="text-xs text-slate-400 text-center">
-                                  +{stat.valueDistribution.length - 3} 更多值
-                                </div>
-                              )}
-                            </div>
-                          )}
+                          <ChevronRight className="w-4 h-4 text-slate-400" />
                         </div>
-                      );
-                    })}
+                        <div className="text-xs text-slate-500 mt-1 truncate">
+                          {currentObjectType?.properties.slice(0, 3).map(prop => (
+                            <span key={prop.id} className="mr-3">
+                              {prop.name}: {instance[prop.id] || '-'}
+                            </span>
+                          ))}
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 )}
               </CardContent>
@@ -580,17 +545,107 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
                 <p>请先选择对象类型查看属性统计</p>
               </div>
             </Card>
-          ) : viewMode === 'overview' ? (
-            <Card className="flex-1 flex items-center justify-center">
-              <div className="text-center text-slate-500">
-                <PieChart className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>点击左侧属性查看值分布详情</p>
-                <p className="text-sm text-slate-400 mt-2">或选择实例查看上下游图谱</p>
-              </div>
-            </Card>
-          ) : viewMode === 'instances' && selectedProperty ? (
-            /* Property Value Distribution & Instances */
+          ) : viewMode === 'overview' && selectedProperty ? (
+            /* Property Dimension Stats & Property Value Distribution */
             <>
+              <Card className="flex-1 flex flex-col min-h-0">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <PieChart className="w-4 h-4" />
+                      属性维度统计
+                      <Badge variant="secondary">{propertyStats.length} 个属性</Badge>
+                    </CardTitle>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => fetchInstances(selectedObjectType)}
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="flex-1 overflow-auto p-0">
+                  {loading ? (
+                    <div className="flex items-center justify-center h-32">
+                      <RefreshCw className="w-5 h-5 animate-spin text-slate-400" />
+                    </div>
+                  ) : propertyStats.length === 0 ? (
+                    <div className="text-center py-8 text-slate-500">
+                      <Database className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p>暂无统计数据</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y">
+                      {propertyStats.map((stat) => {
+                        const Icon = getPropertyIcon(stat.property.type);
+                        return (
+                          <div
+                            key={stat.property.id}
+                            className={cn(
+                              "px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer",
+                              selectedProperty?.id === stat.property.id && "bg-blue-50 hover:bg-blue-50"
+                            )}
+                            onClick={() => setSelectedProperty(stat.property)}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <Icon className="w-4 h-4 text-slate-400" />
+                                <span className="font-medium text-sm">{stat.property.name}</span>
+                              </div>
+                              <Badge variant="outline" className="text-xs">
+                                {stat.property.type || 'string'}
+                              </Badge>
+                            </div>
+                            
+                            <div className="grid grid-cols-3 gap-2 text-xs mb-2">
+                              <div className="bg-slate-50 rounded px-2 py-1 text-center">
+                                <div className="font-semibold text-blue-600">{stat.totalCount}</div>
+                                <div className="text-slate-400">总数</div>
+                              </div>
+                              <div className="bg-slate-50 rounded px-2 py-1 text-center">
+                                <div className="font-semibold text-emerald-600">{stat.uniqueCount}</div>
+                                <div className="text-slate-400">唯一值</div>
+                              </div>
+                              <div className="bg-slate-50 rounded px-2 py-1 text-center">
+                                <div className="font-semibold text-amber-600">{stat.nullCount}</div>
+                                <div className="text-slate-400">空值</div>
+                              </div>
+                            </div>
+
+                            {stat.valueDistribution.length > 0 && (
+                              <div className="space-y-1">
+                                {stat.valueDistribution.slice(0, 3).map((item, idx) => (
+                                  <div key={idx} className="flex items-center gap-2 text-xs">
+                                    <div className="flex-1 truncate text-slate-600" title={item.value}>
+                                      {item.value}
+                                    </div>
+                                    <div className="w-16 bg-slate-100 rounded-full h-1.5">
+                                      <div 
+                                        className="bg-blue-500 h-1.5 rounded-full"
+                                        style={{ width: `${item.percentage}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-slate-400 w-8 text-right">{item.count}</span>
+                                  </div>
+                                ))}
+                                {stat.valueDistribution.length > 3 && (
+                                  <div className="text-xs text-slate-400 text-center">
+                                    +{stat.valueDistribution.length - 3} 更多值
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
@@ -602,16 +657,6 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
                       </CardTitle>
                       <p className="text-sm text-slate-500 mt-1">属性值分布</p>
                     </div>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => {
-                        setSelectedProperty(null);
-                        setViewMode('overview');
-                      }}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -646,64 +691,6 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
                 </CardContent>
               </Card>
 
-              {/* Instances with this property value */}
-              <Card className="flex-1 flex flex-col min-h-0">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <Table className="w-4 h-4" />
-                    实例列表
-                    <Badge variant="secondary">{filteredInstances.length}</Badge>
-                  </CardTitle>
-                  
-                  <div className="relative mt-2">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <Input
-                      placeholder="搜索实例..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-9"
-                    />
-                  </div>
-                </CardHeader>
-                <CardContent className="flex-1 overflow-auto p-0">
-                  {filteredInstances.length === 0 ? (
-                    <div className="text-center py-8 text-slate-500">
-                      <Database className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <p>暂无实例数据</p>
-                    </div>
-                  ) : (
-                    <div className="divide-y">
-                      {filteredInstances.map((instance, index) => (
-                        <button
-                          key={index}
-                          onClick={() => {
-                            setSelectedInstance(instance);
-                            setViewMode('graph');
-                          }}
-                          className={cn(
-                            "w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors",
-                            selectedInstance === instance && "bg-blue-50 hover:bg-blue-50"
-                          )}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="font-medium text-sm truncate">
-                              {primaryKeyProp ? instance[primaryKeyProp.id] : `实例 #${index + 1}`}
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-slate-400" />
-                          </div>
-                          <div className="text-xs text-slate-500 mt-1 truncate">
-                            {currentObjectType?.properties.slice(0, 3).map(prop => (
-                              <span key={prop.id} className="mr-3">
-                                {prop.name}: {instance[prop.id] || '-'}
-                              </span>
-                            ))}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
             </>
           ) : viewMode === 'graph' ? (
             /* Relation Graph */
@@ -735,9 +722,9 @@ export function ObjectExplorer({ data }: ObjectExplorerProps) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setViewMode('instances')}
+                      onClick={() => setViewMode('overview')}
                     >
-                      返回实例列表
+                      返回
                     </Button>
                   </div>
                 </div>

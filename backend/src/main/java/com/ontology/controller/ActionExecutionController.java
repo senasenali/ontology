@@ -28,7 +28,9 @@ public class ActionExecutionController {
     private final ActionEffectMapper effectMapper;
     private final NotificationMapper notificationMapper;
     private final OntologyRuleMapper ontologyRuleMapper;
+    private final OntologyRuleParamMapper ontologyRuleParamMapper;
     private final FunctionTypeMapper functionTypeMapper;
+    private final FunctionParamMapper functionParamMapper;
     private final ObjectTypeMapper objectTypeMapper;
     private final PropertyMapper propertyMapper;
     private final JdbcTemplate jdbcTemplate;
@@ -206,53 +208,47 @@ public class ActionExecutionController {
             
             String tableName = objectType.getBackingDataset();
             List<Property> properties = propertyMapper.selectByObjectTypeId(objectTypeId);
+            List<OntologyRuleParam> inputParams = ontologyRuleParamMapper.selectInputParamsByRuleId(rule.getId());
             
-            // 构建属性映射: baseColumn -> propertyId
-            Map<String, String> columnToPropId = new HashMap<>();
+            // 构建属性映射
+            Map<String, Property> propertyById = new HashMap<>();
+            Map<String, Property> propertyByColumn = new HashMap<>();
             for (Property prop : properties) {
+                if (prop.getId() != null && !prop.getId().isEmpty()) {
+                    propertyById.put(prop.getId(), prop);
+                }
                 if (prop.getBaseColumn() != null && !prop.getBaseColumn().isEmpty()) {
-                    columnToPropId.put(prop.getBaseColumn(), prop.getId());
+                    propertyByColumn.put(prop.getBaseColumn(), prop);
                 }
             }
             
             // 构建插入数据
             Map<String, Object> insertData = new HashMap<>();
+            Map<String, String> ruleParamDefaults = buildRuleParamDefaults(ruleParams);
             
-            // 处理规则参数
-            if (ruleParams != null) {
-                for (ActionRuleParam param : ruleParams) {
-                    String paramName = param.getParamName();
-                    if (paramName != null && !paramName.isEmpty()) {
-                        // 从执行参数中获取值（支持paramName和baseColumn两种key）
-                        Object value = null;
-                        
-                        // 首先尝试用paramName查找
-                        if (parameters.containsKey(paramName)) {
-                            value = parameters.get(paramName);
-                        }
-                        
-                        // 如果没找到，尝试用baseColumn查找（如果不同）
-                        if (value == null && columnToPropId.containsKey(paramName)) {
-                            // paramName就是baseColumn，已经尝试过了
-                        }
-                        
-                        // 如果还是没找到，使用默认值
-                        if (value == null) {
-                            value = param.getParamValue();
-                        }
-                        
-                        if (value != null) {
-                            // 查找对应的属性ID
-                            String propId = columnToPropId.get(paramName);
-                            if (propId != null) {
-                                insertData.put(propId, value.toString());
-                            } else {
-                                // 如果找不到映射，直接使用参数名
-                                insertData.put(paramName, value.toString());
-                            }
-                        }
+            // 优先按本体规则定义的入参消费本次请求；action_rule_params 仅作为默认值兜底
+            if (inputParams != null && !inputParams.isEmpty()) {
+                for (OntologyRuleParam inputParam : inputParams) {
+                    String paramName = inputParam.getParamName();
+                    if (paramName == null || paramName.isEmpty()) continue;
+                    Object value = resolveOntologyParameterValue(paramName, parameters, ruleParamDefaults, propertyById, propertyByColumn);
+                    if (value != null) {
+                        putOntologyInsertValue(insertData, paramName, value, propertyById, propertyByColumn);
                     }
                 }
+            } else {
+                // 没有定义输入参数时，直接消费本次执行提交的参数
+                for (Map.Entry<String, Object> entry : parameters.entrySet()) {
+                    if (entry.getValue() == null) continue;
+                    if ("instanceId".equals(entry.getKey()) || "id".equals(entry.getKey())) continue;
+                    putOntologyInsertValue(insertData, entry.getKey(), entry.getValue(), propertyById, propertyByColumn);
+                }
+            }
+
+            // 对于本次没有传入、但规则表里有默认值的参数，再补一次兜底
+            for (Map.Entry<String, String> entry : ruleParamDefaults.entrySet()) {
+                if (entry.getValue() == null) continue;
+                putOntologyInsertValueIfAbsent(insertData, entry.getKey(), entry.getValue(), propertyById, propertyByColumn);
             }
             
             // 根据规则类别执行不同操作
@@ -318,21 +314,30 @@ public class ActionExecutionController {
         try {
             // 构建请求参数
             Map<String, Object> requestBody = new HashMap<>();
+            List<FunctionParam> functionInputParams = functionParamMapper.selectByFunctionIdAndDirection(functionType.getId(), "INPUT");
+            Map<String, String> ruleParamDefaults = buildRuleParamDefaults(ruleParams);
             
-            // 如果有规则参数，按规则参数构建请求体
-            if (ruleParams != null && !ruleParams.isEmpty()) {
-                for (ActionRuleParam param : ruleParams) {
-                    if (param.getParamName() != null && !param.getParamName().isEmpty()) {
-                        Object value = parameters.get(param.getParamName());
-                        if (value == null) {
-                            value = param.getParamValue();
-                        }
-                        requestBody.put(param.getParamName(), value);
+            // 优先用本次请求参数；ruleParams 与函数默认值仅作兜底
+            if (functionInputParams != null && !functionInputParams.isEmpty()) {
+                for (FunctionParam param : functionInputParams) {
+                    String requestKey = (param.getParamCode() != null && !param.getParamCode().isEmpty())
+                            ? param.getParamCode()
+                            : param.getParamName();
+                    if (requestKey == null || requestKey.isEmpty()) continue;
+                    Object value = resolveFunctionParameterValue(requestKey, param.getParamName(), parameters, ruleParamDefaults, param.getDefaultValue());
+                    if (value != null) {
+                        requestBody.put(requestKey, value);
                     }
                 }
             } else {
-                // 没有规则参数时，直接使用传入的参数
                 requestBody.putAll(parameters);
+            }
+
+            // 如果函数入参中没有覆盖到，但本次请求里额外传了参数，也一并透传
+            for (Map.Entry<String, Object> entry : parameters.entrySet()) {
+                if (!requestBody.containsKey(entry.getKey()) && entry.getValue() != null) {
+                    requestBody.put(entry.getKey(), entry.getValue());
+                }
             }
             
             // 调用函数类型接口
@@ -372,6 +377,110 @@ public class ActionExecutionController {
         }
         
         return result;
+    }
+
+    private Map<String, String> buildRuleParamDefaults(List<ActionRuleParam> ruleParams) {
+        Map<String, String> defaults = new HashMap<>();
+        if (ruleParams == null) return defaults;
+        for (ActionRuleParam param : ruleParams) {
+            if (param.getParamName() == null || param.getParamName().isEmpty()) continue;
+            defaults.put(param.getParamName(), param.getParamValue());
+        }
+        return defaults;
+    }
+
+    private Object resolveOntologyParameterValue(
+            String paramName,
+            Map<String, Object> parameters,
+            Map<String, String> ruleParamDefaults,
+            Map<String, Property> propertyById,
+            Map<String, Property> propertyByColumn) {
+        if (parameters.containsKey(paramName)) {
+            Object value = normalizeExecutionValue(parameters.get(paramName));
+            if (value != null) return value;
+        }
+        Property byId = propertyById.get(paramName);
+        if (byId != null && byId.getBaseColumn() != null) {
+            Object value = normalizeExecutionValue(parameters.get(byId.getBaseColumn()));
+            if (value != null) return value;
+        }
+        Property byColumn = propertyByColumn.get(paramName);
+        if (byColumn != null && byColumn.getId() != null) {
+            Object value = normalizeExecutionValue(parameters.get(byColumn.getId()));
+            if (value != null) return value;
+        }
+        return normalizeExecutionValue(ruleParamDefaults.get(paramName));
+    }
+
+    private void putOntologyInsertValue(
+            Map<String, Object> insertData,
+            String paramName,
+            Object value,
+            Map<String, Property> propertyById,
+            Map<String, Property> propertyByColumn) {
+        if (value == null) return;
+        value = normalizeExecutionValue(value);
+        if (value == null) return;
+        Property property = propertyById.get(paramName);
+        if (property == null) {
+            property = propertyByColumn.get(paramName);
+        }
+        if (property != null && property.getId() != null) {
+            insertData.put(property.getId(), value.toString());
+        } else {
+            insertData.put(paramName, value.toString());
+        }
+    }
+
+    private void putOntologyInsertValueIfAbsent(
+            Map<String, Object> insertData,
+            String paramName,
+            Object value,
+            Map<String, Property> propertyById,
+            Map<String, Property> propertyByColumn) {
+        Property property = propertyById.get(paramName);
+        if (property == null) {
+            property = propertyByColumn.get(paramName);
+        }
+        String targetKey = property != null && property.getId() != null ? property.getId() : paramName;
+        Object normalized = normalizeExecutionValue(value);
+        if (!insertData.containsKey(targetKey) && normalized != null) {
+            insertData.put(targetKey, normalized.toString());
+        }
+    }
+
+    private Object resolveFunctionParameterValue(
+            String requestKey,
+            String paramName,
+            Map<String, Object> parameters,
+            Map<String, String> ruleParamDefaults,
+            String functionDefaultValue) {
+        if (parameters.containsKey(requestKey)) {
+            Object value = normalizeExecutionValue(parameters.get(requestKey));
+            if (value != null) return value;
+        }
+        if (paramName != null && parameters.containsKey(paramName)) {
+            Object value = normalizeExecutionValue(parameters.get(paramName));
+            if (value != null) return value;
+        }
+        if (ruleParamDefaults.containsKey(requestKey)) {
+            Object value = normalizeExecutionValue(ruleParamDefaults.get(requestKey));
+            if (value != null) return value;
+        }
+        if (paramName != null && ruleParamDefaults.containsKey(paramName)) {
+            Object value = normalizeExecutionValue(ruleParamDefaults.get(paramName));
+            if (value != null) return value;
+        }
+        return normalizeExecutionValue(functionDefaultValue);
+    }
+
+    private Object normalizeExecutionValue(Object value) {
+        if (value == null) return null;
+        if (value instanceof String) {
+            String trimmed = ((String) value).trim();
+            return trimmed.isEmpty() ? null : trimmed;
+        }
+        return value;
     }
     
     private Map<String, Object> executeEffect(ActionEffect effect, ActionType actionType, String instanceId) {

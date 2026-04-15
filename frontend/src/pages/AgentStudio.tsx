@@ -1,19 +1,45 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, Plus, Play, Pause, Trash2, RefreshCw, ChevronRight,
-  AlertTriangle, TrendingUp, TrendingDown, Minus, Clock, Zap,
-  FileText, ArrowRight, Activity, Target, Building2, Loader2,
-  ToggleLeft, ToggleRight, ChevronDown, ChevronUp, ExternalLink,
-  Sparkles, Search, MessageSquare, Send, Link as LinkIcon, Network, Square,
+  Activity,
+  ArrowRight,
+  Bot,
+  Building2,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Clock,
+  ExternalLink,
+  FileText,
+  Flame,
+  Link as LinkIcon,
+  Loader2,
+  MessageSquare,
+  Minus,
+  Network,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  Send,
+  Sparkles,
+  Square,
+  Target,
+  Database,
+  ToggleLeft,
+  ToggleRight,
+  Trash2,
+  TrendingDown,
+  TrendingUp,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast } from 'sonner';
 import { api } from '@/src/api/client';
 import { streamResearchChat } from '@/src/api/streamClient';
+import { EventPropagationExplorer } from '@/src/components/EventPropagationExplorer';
 import { cn } from '@/src/lib/utils';
 import { searchStocks, StockItem } from '@/src/data/cnStocks';
 
-/* ─── Types ────────────────────────────────────────────────────────────────── */
 interface Agent {
   id: string;
   name: string;
@@ -58,9 +84,70 @@ interface AgentAnalysis {
   impact_chain: ImpactChainItem[];
   recommendation: string;
   created_at: string;
+  transmissionData?: PriceTransmissionData;
 }
 
-/* ─── Helpers ──────────────────────────────────────────────────────────────── */
+interface PriceTransmissionSource {
+  id: string;
+  name: string | null;
+  previousPrice: number;
+  latestPrice: number;
+  priceChangePercent: number;
+}
+
+interface PriceTransmissionAffectedInstance {
+  id: string;
+  objectTypeId: string;
+  objectTypeName: string;
+  name: string;
+  relationPath: string;
+  relationDepth: number;
+  previousPrice: number;
+  transmissionCoefficient: number;
+  latestPrice: number;
+  priceChangeAmount: number;
+}
+
+interface PriceTransmissionData {
+  sourceInstance: PriceTransmissionSource;
+  transmissionCoefficient: number;
+  affectedInstances: PriceTransmissionAffectedInstance[];
+  summary: {
+    totalAffectedInstances: number;
+    totalPriceChangeAmount: number;
+  };
+}
+
+interface HotEventItem {
+  id: string;
+  title: string;
+  category: string;
+  occurredAt: string;
+  summary: string;
+  tags: string[];
+  targetCompanies: string[];
+  commentary: string;
+}
+
+type InsightSummaryItem = {
+  label: string;
+  value: string;
+};
+
+type InsightSection = {
+  title: string;
+  paragraphs: string[];
+  bullets?: string[];
+};
+
+type EventInsightContent = {
+  title: string;
+  badge: string;
+  conclusion: string;
+  summaryItems: InsightSummaryItem[];
+  sections: InsightSection[];
+};
+
 const impactColors = {
   high: 'bg-red-100 text-red-700 border-red-200',
   medium: 'bg-amber-100 text-amber-700 border-amber-200',
@@ -73,102 +160,514 @@ const impactIcons = {
   low: TrendingDown,
 };
 
-function timeAgo(dateStr: string) {
-  if (!dateStr) return '从未';
-  // SQLite datetime format: "2026-04-01 06:05:33" → replace space with T and add Z
-  const normalized = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T') + 'Z';
-  const d = new Date(normalized);
-  if (isNaN(d.getTime())) return dateStr;
-  const now = new Date();
-  const diff = Math.floor((now.getTime() - d.getTime()) / 1000);
-  if (diff < 60) return '刚刚';
-  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
-  return `${Math.floor(diff / 86400)}天前`;
+const MOCK_AGENTS: Agent[] = [
+  {
+    id: 'demo_agent_lithium',
+    name: '碳酸锂标的跟踪',
+    description: '跟踪碳酸锂价格变化，并持续观察其向电解液、电芯和动力电池环节的成本传导。',
+    target_company: '碳酸锂',
+    target_industry: '锂电材料',
+    analysis_focus: '价格波动、成本传导、电池链盈利压力',
+    schedule_minutes: 120,
+    is_active: 1,
+    last_run_at: '2026-04-15 07:20:00',
+    created_at: '2026-04-08 14:10:00',
+    updated_at: '2026-04-15 07:20:00',
+  },
+  {
+    id: 'demo_agent_byd',
+    name: '比亚迪标的跟踪',
+    description: '围绕新能源车价格战、海外出口、补能网络与供应链成本变化，跟踪比亚迪产业链的边际变化。',
+    target_company: '比亚迪（002594.SZ）',
+    target_industry: '新能源汽车',
+    analysis_focus: '价格战持续性、出海节奏、充电生态协同',
+    schedule_minutes: 60,
+    is_active: 1,
+    last_run_at: '2026-04-15 08:45:00',
+    created_at: '2026-04-09 09:20:00',
+    updated_at: '2026-04-15 08:45:00',
+  },
+];
+
+const MOCK_EVENTS: Record<string, AgentEvent[]> = {
+  demo_agent_byd: [
+    {
+      id: 'evt_byd_1',
+      agent_id: 'demo_agent_byd',
+      title: '政策支持充电基础设施建设',
+      summary: '政策端继续强调充电基础设施建设和补能网络完善，市场关注其对充电运营、设备制造及整车消费渗透的带动效应。',
+      source: '证券时报',
+      source_url: 'https://example.com/news/charging-infra',
+      event_date: '2026-04-15',
+      impact_level: 'high',
+      related_entities: ['比亚迪', '充电桩', '高压快充'],
+      created_at: '2026-04-15 08:40:00',
+    },
+    {
+      id: 'evt_byd_2',
+      agent_id: 'demo_agent_byd',
+      title: '新能源车价格战再起，行业利润承压',
+      summary: '多家车企再度降价抢量，市场担心整车盈利能力和上游议价空间同步承压，部分零部件环节也面临价格传导压力。',
+      source: '财联社',
+      source_url: 'https://example.com/news/ev-price-war',
+      event_date: '2026-04-14',
+      impact_level: 'medium',
+      related_entities: ['比亚迪', '整车', '零部件'],
+      created_at: '2026-04-14 18:25:00',
+    },
+  ],
+  demo_agent_lithium: [
+    {
+      id: 'evt_lithium_1',
+      agent_id: 'demo_agent_lithium',
+      title: '碳酸锂价格快速上涨',
+      summary: '电池级碳酸锂价格单周上行约 25%，市场开始重新评估电解液、电芯与动力电池环节的成本承压与提价传导节奏。',
+      source: '上海证券报',
+      source_url: 'https://example.com/news/lithium-price',
+      event_date: '2026-04-15',
+      impact_level: 'high',
+      related_entities: ['碳酸锂', '电池电解液', '电芯', '动力电池'],
+      created_at: '2026-04-15 07:10:00',
+    },
+  ],
+};
+
+const LITHIUM_TRANSMISSION_DATA: PriceTransmissionData = {
+  sourceInstance: {
+    id: 'LC-BT-001-2024',
+    name: null,
+    previousPrice: 12.5,
+    latestPrice: 15.63,
+    priceChangePercent: 25,
+  },
+  transmissionCoefficient: 18,
+  affectedInstances: [
+    {
+      id: 'EL-FD-001-2024',
+      objectTypeId: 'battery_electrolyte',
+      objectTypeName: '电池电解液',
+      name: 'EL-FD-001-2024',
+      relationPath: 'LC-BT-001-2024 → EL-FD-001-2024',
+      relationDepth: 1,
+      previousPrice: 5.8,
+      transmissionCoefficient: 14.4,
+      latestPrice: 6.64,
+      priceChangeAmount: 0.84,
+    },
+    {
+      id: 'EL-FD-002-2024',
+      objectTypeId: 'battery_electrolyte',
+      objectTypeName: '电池电解液',
+      name: 'EL-FD-002-2024',
+      relationPath: 'LC-BT-001-2024 → EL-FD-002-2024',
+      relationDepth: 1,
+      previousPrice: 6.5,
+      transmissionCoefficient: 14.4,
+      latestPrice: 7.44,
+      priceChangeAmount: 0.94,
+    },
+    {
+      id: 'EL-SS-001-2024',
+      objectTypeId: 'battery_electrolyte',
+      objectTypeName: '电池电解液',
+      name: 'EL-SS-001-2024',
+      relationPath: 'LC-BT-001-2024 → EL-SS-001-2024',
+      relationDepth: 1,
+      previousPrice: 12.5,
+      transmissionCoefficient: 14.4,
+      latestPrice: 14.3,
+      priceChangeAmount: 1.8,
+    },
+    {
+      id: 'BC-PANA-001-2024',
+      objectTypeId: 'battery_cell',
+      objectTypeName: '电芯',
+      name: 'BC-PANA-001-2024',
+      relationPath: 'LC-BT-001-2024 → ... → BC-PANA-001-2024',
+      relationDepth: 2,
+      previousPrice: 1.12,
+      transmissionCoefficient: 11.52,
+      latestPrice: 1.25,
+      priceChangeAmount: 0.13,
+    },
+  ],
+  summary: {
+    totalAffectedInstances: 4,
+    totalPriceChangeAmount: 3.71,
+  },
+};
+
+const MOCK_ANALYSES: Record<string, AgentAnalysis[]> = {
+  demo_agent_byd: [
+    {
+      id: 'ana_byd_1',
+      agent_id: 'demo_agent_byd',
+      event_id: 'evt_byd_1',
+      title: '充电基础设施加码带来的二阶需求扩散',
+      content:
+        '本轮政策强化的不只是充电桩数量扩张，更关键的是快充网络完善带来的补能体验提升。对于比亚迪而言，补能效率提升将强化高频用车场景的购买意愿，进而推动销量与车型结构改善。除整车本身外，高压快充配套、线束连接器及站端设备等环节也会获得更高确定性的需求增量。',
+      key_findings: [
+        '补能网络完善将改善新能源车使用体验，利好整车销量释放。',
+        '高压快充配套环节的价值量提升往往被市场低估。',
+        '设备端订单释放更快，整车端体现更晚但弹性更大。',
+      ],
+      impact_chain: [
+        { from: '充电基础设施', to: '高压快充配套', mechanism: '扩容提速', intensity: 'high' },
+        { from: '高压快充配套', to: '比亚迪', mechanism: '需求增强', intensity: 'medium' },
+      ],
+      recommendation: '短期关注充电设备和高压配套，中期继续跟踪整车销量与车型结构改善。',
+      created_at: '2026-04-15 08:42:00',
+    },
+  ],
+  demo_agent_lithium: [
+    {
+      id: 'ana_lithium_1',
+      agent_id: 'demo_agent_lithium',
+      event_id: 'evt_lithium_1',
+      title: '碳酸锂价格上涨 25% 带来的成本传导重估',
+      content:
+        '碳酸锂价格快速上行后，成本并不会一次性传导到所有下游环节，而是沿着“锂盐 - 电解液 - 电芯 - 动力电池”的链路逐级扩散。当前更值得观察的是：电解液和电芯的提价速度是否快于市场预期，以及这种成本压力最终会给电池和整车利润带来多大挤压。',
+      key_findings: [
+        '碳酸锂价格已从 12.50 上涨至 15.63，单轮涨幅约 25%。',
+        '一阶受影响的是电解液环节，价格传导系数约为 +14.4%。',
+        '二阶传导已延伸至电芯实例，后续需继续观察动力电池与整车端的成本承压与提价能力。',
+      ],
+      impact_chain: [],
+      recommendation: '继续跟踪电解液、电芯与动力电池的跟涨幅度，判断成本压力会更多由中游吸收，还是继续向下游整车端传导。',
+      created_at: '2026-04-15 07:18:00',
+      transmissionData: LITHIUM_TRANSMISSION_DATA,
+    },
+  ],
+};
+
+const MOCK_HOT_EVENTS: HotEventItem[] = [
+  {
+    id: 'hot_3',
+    title: '宁德时代与中恒电气达成储能协同合作',
+    category: '关系发现',
+    occurredAt: '2026-04-13',
+    summary: '合作消息触发市场对储能产业链关系的重新梳理，研究员希望进一步确认合作关系是否足以沉淀为图谱中的正式关系。',
+    tags: ['储能', '合作关系', '图谱写回'],
+    targetCompanies: ['宁德时代', '中恒电气'],
+    commentary: '这类事件不仅影响市场情绪，更适合作为图谱关系发现与审核写回的演示样本，便于串联 AI 工坊与本体图谱协作场景。',
+  },
+  {
+    id: 'hot_1',
+    title: '政策支持充电基础设施建设',
+    category: '政策驱动',
+    occurredAt: '2026-04-15',
+    summary: '政策端继续强调充电基础设施建设和补能网络完善，市场关注其对充电运营、设备制造及整车消费渗透的带动效应。',
+    tags: ['充电基础设施', '高压快充', '新能源汽车'],
+    targetCompanies: ['比亚迪', '特锐德', '中恒电气', '永贵电器'],
+    commentary: '市场对该事件的第一反应通常停留在“利好充电桩设备商”，但真正更有弹性的往往是高压快充相关零部件与使用体验改善后带来的整车需求二阶扩散。',
+  },
+];
+
+function formatDateTime(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-/* ─── Stock Autocomplete ───────────────────────────────────────────────────── */
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function timeAgo(dateStr: string | null) {
+  if (!dateStr) return '从未执行';
+  const normalized = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T') + 'Z';
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  return `${Math.floor(diff / 86400)} 天前`;
+}
+
+function formatSignedNumber(value: number, fractionDigits = 2) {
+  const absValue = Math.abs(value).toFixed(fractionDigits);
+  if (value > 0) return `+${absValue}`;
+  if (value < 0) return `-${absValue}`;
+  return absValue;
+}
+
+function getTransmissionAccent(objectTypeId: string) {
+  if (objectTypeId === 'lithium_carbonate') {
+    return {
+      card: 'border-cyan-200 bg-cyan-50/70 shadow-cyan-100/70',
+      badge: 'border-cyan-200 bg-cyan-100 text-cyan-700',
+      icon: 'bg-cyan-500/10 text-cyan-700',
+      line: 'from-cyan-300 via-cyan-200 to-cyan-100',
+    };
+  }
+
+  if (objectTypeId === 'battery_electrolyte') {
+    return {
+      card: 'border-emerald-200 bg-emerald-50/70 shadow-emerald-100/70',
+      badge: 'border-emerald-200 bg-emerald-100 text-emerald-700',
+      icon: 'bg-emerald-500/10 text-emerald-700',
+      line: 'from-emerald-300 via-emerald-200 to-emerald-100',
+    };
+  }
+
+  if (objectTypeId === 'battery_cell') {
+    return {
+      card: 'border-violet-200 bg-violet-50/70 shadow-violet-100/70',
+      badge: 'border-violet-200 bg-violet-100 text-violet-700',
+      icon: 'bg-violet-500/10 text-violet-700',
+      line: 'from-violet-300 via-violet-200 to-violet-100',
+    };
+  }
+
+  return {
+    card: 'border-slate-200 bg-slate-50 shadow-slate-100/70',
+    badge: 'border-slate-200 bg-slate-100 text-slate-700',
+    icon: 'bg-slate-500/10 text-slate-700',
+    line: 'from-slate-300 via-slate-200 to-slate-100',
+  };
+}
+
+function normalize(value: string) {
+  return String(value || '')
+    .replace(/\s+/g, '')
+    .replace(/[：:，,。.!！？?（）()【】\[\]-]/g, '')
+    .toLowerCase();
+}
+
+function getHotEventSortRank(title: string) {
+  const normalized = normalize(title);
+  if (normalized.includes('碳酸锂')) return 0;
+  if (normalized.includes('充电基础设施') || normalized.includes('充电桩')) return 1;
+  if (normalized.includes('中恒电气') || normalized.includes('合作')) return 2;
+  return 99;
+}
+
+function getEventInsight(title: string): EventInsightContent | null {
+  const normalized = normalize(title);
+
+  if (normalized.includes('充电基础设施') || normalized.includes('充电桩')) {
+    return {
+      title: '充电基础设施政策加码',
+      badge: '中长期利好',
+      conclusion: '补能瓶颈缓解会通过“体验改善 - 需求释放 - 配套升级”的路径向整车和零部件环节传导。',
+      summaryItems: [
+        { label: '事件定性', value: '中长期利好' },
+        { label: '预期差', value: '市场低估高压快充相关配套的价值量提升' },
+        { label: '策略建议', value: '短期看设备订单，中期看高压配套，长期看整车销量' },
+        { label: '核心逻辑', value: '基础设施完善带来的二阶需求扩散' },
+      ],
+      sections: [
+        {
+          title: '一、事件概述',
+          paragraphs: ['政策强调补能网络建设、快充布局和运营体系优化，事件的意义不只在设备投资本身。'],
+        },
+        {
+          title: '二、深度点评',
+          paragraphs: ['市场最容易高估设备端的短期弹性，低估整车体验改善后对销量的中长期拉动。'],
+          bullets: [
+            '设备端最先体现订单弹性，但竞争相对充分。',
+            '高压连接器、线束等配套环节更受益于价值量提升。',
+            '整车端的需求改善体现更慢，但弹性更大。',
+          ],
+        },
+      ],
+    };
+  }
+
+  if (normalized.includes('碳酸锂')) {
+    return {
+      title: '碳酸锂价格持续下探',
+      badge: '结构性利好',
+      conclusion: '锂价下行推动利润由资源端向电池与整车迁移，但价格战会影响利润释放节奏。',
+      summaryItems: [
+        { label: '事件定性', value: '结构性利好中下游' },
+        { label: '预期差', value: '利润传导是逐级进行的，不会一次性完成' },
+        { label: '策略建议', value: '重点跟踪电池与整车环节的利润修复斜率' },
+        { label: '核心逻辑', value: '成本下降 - 传导扩散 - 盈利重估' },
+      ],
+      sections: [
+        {
+          title: '一、事件概述',
+          paragraphs: ['锂价连续回落直接影响资源端利润，同时也为材料、电芯和整车环节创造成本改善空间。'],
+        },
+        {
+          title: '二、深度点评',
+          paragraphs: ['市场对于“谁最受益”往往只看到整车，但中游电芯和材料同样可能出现阶段性的盈利修复。'],
+          bullets: [
+            '资源端利润承压最先体现。',
+            '电芯盈利修复通常滞后但斜率清晰。',
+            '若整车价格战加剧，下游利润释放会被部分吞噬。',
+          ],
+        },
+      ],
+    };
+  }
+
+  if (normalized.includes('中恒电气') || normalized.includes('合作')) {
+    return {
+      title: '合作关系带来的图谱关系发现',
+      badge: '关系发现样本',
+      conclusion: '这类合作事件既能服务研究解读，也很适合演示“候选关系识别 - 研究员确认 - 图谱写回”的协同链路。',
+      summaryItems: [
+        { label: '事件定性', value: '关系发现类样本' },
+        { label: '预期差', value: '新闻不只是情绪催化，也能沉淀为结构化知识' },
+        { label: '策略建议', value: '优先抽取合作对象、合作类型、业务范围与证据片段' },
+        { label: '核心逻辑', value: '从文本证据到图谱关系的结构化迁移' },
+      ],
+      sections: [
+        {
+          title: '一、事件概述',
+          paragraphs: ['事件中的合作主体、合作方向和业务边界都适合沉淀成图谱中的候选关系。'],
+        },
+        {
+          title: '二、深度点评',
+          paragraphs: ['对于研究员而言，这是热点解读；对于本体平台而言，这又是很好的关系发现入口。'],
+          bullets: [
+            '优先抽取关系主体与合作类型。',
+            '保留原始文本证据，便于后续审核与追溯。',
+            '写回图谱后可用于后续事件推理和关系联动分析。',
+          ],
+        },
+      ],
+    };
+  }
+
+  return null;
+}
+
+function createStarterEvent(agent: Agent): AgentEvent {
+  const now = formatDateTime(new Date());
+  return {
+    id: `evt_${agent.id}_${Date.now()}`,
+    agent_id: agent.id,
+    title: `${agent.target_company} 相关产业链新动态`,
+    summary: `系统围绕 ${agent.target_company} 的研究重点生成了一条最新事件，用于展示事件发现、分析解读和后续研究流程。`,
+    source: '研究监测',
+    source_url: '',
+    event_date: now.slice(0, 10),
+    impact_level: 'medium',
+    related_entities: [agent.target_company, agent.target_industry],
+    created_at: now,
+  };
+}
+
+function createStarterAnalysis(agent: Agent, event: AgentEvent): AgentAnalysis {
+  const now = formatDateTime(new Date());
+  return {
+    id: `ana_${agent.id}_${Date.now()}`,
+    agent_id: agent.id,
+    event_id: event.id,
+    title: `${agent.target_company} 最新跟踪分析`,
+    content: `${agent.target_company} 的最新变化已同步到研究视图。后续可以结合研究智能体输出的分析报告与影响链路，持续补充对产业链节点和关键关系的判断。`,
+    key_findings: [
+      '最新监测结果已同步到当前标的跟踪视图。',
+      '可继续结合产业链事件和关系变化补充研判。',
+    ],
+    impact_chain: [
+      { from: '事件发现', to: agent.target_industry, mechanism: '触发跟踪', intensity: 'medium' },
+      { from: agent.target_industry, to: agent.target_company, mechanism: '研究聚焦', intensity: 'medium' },
+    ],
+    recommendation: '建议继续结合热点事件和上下游关系变化，跟踪关键信号的持续性。',
+    created_at: now,
+  };
+}
+
 function StockAutocomplete({
   value,
   onChange,
   onSelect,
 }: {
   value: string;
-  onChange: (v: string) => void;
+  onChange: (value: string) => void;
   onSelect: (stock: StockItem) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState<StockItem[]>([]);
-  const ref = React.useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    const handler = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const handleInput = (q: string) => {
-    onChange(q);
-    const r = searchStocks(q, 8);
-    setResults(r);
-    setOpen(r.length > 0);
+  const handleInput = (query: string) => {
+    onChange(query);
+    const nextResults = searchStocks(query, 8);
+    setResults(nextResults);
+    setOpen(nextResults.length > 0);
   };
 
   return (
     <div ref={ref} className="relative">
       <input
-        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-        placeholder="输入代码或名称搜索，如 688981、中芯国际"
+        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
+        placeholder="输入代码或名称搜索，如 300750、宁德时代"
         value={value}
-        onChange={e => handleInput(e.target.value)}
-        onFocus={() => { if (results.length > 0) setOpen(true); }}
+        onChange={(event) => handleInput(event.target.value)}
+        onFocus={() => {
+          if (results.length > 0) setOpen(true);
+        }}
       />
-      {open && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-          {results.map(s => (
+      {open ? (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+          {results.map((stock) => (
             <button
-              key={`${s.market}-${s.code}`}
-              className="w-full text-left px-3 py-2 hover:bg-blue-50 transition-colors flex items-center gap-2 text-sm border-b border-slate-50 last:border-0"
-              onClick={() => { onSelect(s); setOpen(false); }}
+              key={`${stock.market}-${stock.code}`}
+              className="flex w-full items-center gap-2 border-b border-slate-50 px-3 py-2 text-left text-sm transition-colors last:border-0 hover:bg-blue-50"
+              onClick={() => {
+                onSelect(stock);
+                setOpen(false);
+              }}
             >
-              <span className={cn(
-                'text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0',
-                s.market === 'A' ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'
-              )}>
-                {s.market === 'A' ? 'A股' : 'H股'}
+              <span
+                className={cn(
+                  'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold',
+                  stock.market === 'A' ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600',
+                )}
+              >
+                {stock.market === 'A' ? 'A股' : 'H股'}
               </span>
-              <span className="font-mono text-xs text-slate-400 w-14 shrink-0">{s.code}</span>
-              <span className="font-medium text-slate-800 truncate">{s.name}</span>
-              <span className="text-xs text-slate-400 ml-auto shrink-0">{s.industry}</span>
+              <span className="w-14 shrink-0 font-mono text-xs text-slate-400">{stock.code}</span>
+              <span className="truncate font-medium text-slate-800">{stock.name}</span>
+              <span className="ml-auto shrink-0 text-xs text-slate-400">{stock.industry}</span>
             </button>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
-/* ─── Create Agent Dialog ──────────────────────────────────────────────────── */
-function CreateAgentForm({ onCreated, onCancel }: { onCreated: (a: Agent) => void; onCancel: () => void }) {
+function CreateAgentForm({
+  onCreated,
+  onCancel,
+}: {
+  onCreated: (agent: Agent) => void;
+  onCancel: () => void;
+}) {
   const [form, setForm] = useState({
     name: '',
     description: '',
     targetCompany: '',
-    targetIndustry: '半导体设备',
+    targetIndustry: '新能源汽车',
     analysisFocus: '',
     scheduleMinutes: 60,
   });
   const [creating, setCreating] = useState(false);
 
   const handleStockSelect = (stock: StockItem) => {
-    const label = `${stock.name}（${stock.code}.${stock.market === 'A' ? 'SH/SZ' : 'HK'}）`;
-    setForm(prev => ({
+    const suffix = stock.market === 'A' ? 'SH/SZ' : 'HK';
+    const targetCompany = `${stock.name}（${stock.code}.${suffix}）`;
+    setForm((prev) => ({
       ...prev,
-      targetCompany: label,
+      targetCompany,
       targetIndustry: stock.industry,
-      name: prev.name || `${stock.name}投研追踪`,
+      name: prev.name || `${stock.name}标的跟踪`,
     }));
   };
 
@@ -178,117 +677,159 @@ function CreateAgentForm({ onCreated, onCancel }: { onCreated: (a: Agent) => voi
       return;
     }
     setCreating(true);
-    try {
-      const res = await api.createResearchAgent(form);
-      toast.success('智能体创建成功');
-      onCreated(res.agent);
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      setCreating(false);
-    }
+    await wait(300);
+    const now = formatDateTime(new Date());
+    onCreated({
+      id: `demo_agent_${Date.now()}`,
+      name: form.name,
+      description: form.description,
+      target_company: form.targetCompany,
+      target_industry: form.targetIndustry,
+      analysis_focus: form.analysisFocus,
+      schedule_minutes: form.scheduleMinutes,
+      is_active: 1,
+      last_run_at: null,
+      created_at: now,
+      updated_at: now,
+    });
+    toast.success('标的跟踪已创建');
+    setCreating(false);
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5 shadow-sm">
+    <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex items-center gap-2 text-lg font-semibold">
-        <Bot className="w-5 h-5 text-blue-600" />
-        创建投研智能体
+        <Bot className="h-5 w-5 text-blue-600" />
+        新建标的跟踪
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="col-span-2">
-          <label className="block text-xs font-medium text-slate-500 mb-1">
-            目标上市公司 *
-            <span className="text-slate-400 font-normal ml-1">（支持A股/H股代码或名称搜索）</span>
+          <label className="mb-1 block text-xs font-medium text-slate-500">
+            目标标的 *
+            <span className="ml-1 font-normal text-slate-400">（支持 A 股 / H 股代码或名称搜索）</span>
           </label>
           <StockAutocomplete
             value={form.targetCompany}
-            onChange={v => setForm({ ...form, targetCompany: v })}
+            onChange={(value) => setForm((prev) => ({ ...prev, targetCompany: value }))}
             onSelect={handleStockSelect}
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">智能体名称 *</label>
-          <input className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-            placeholder="如：北方华创投研追踪"
-            value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+          <label className="mb-1 block text-xs font-medium text-slate-500">标的跟踪名称 *</label>
+          <input
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            placeholder="如：宁德时代标的跟踪"
+            value={form.name}
+            onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+          />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">所属行业 *</label>
-          <input className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-            value={form.targetIndustry} onChange={e => setForm({ ...form, targetIndustry: e.target.value })} />
+          <label className="mb-1 block text-xs font-medium text-slate-500">所属行业 *</label>
+          <input
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            value={form.targetIndustry}
+            onChange={(event) => setForm((prev) => ({ ...prev, targetIndustry: event.target.value }))}
+          />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">定时执行间隔（分钟）</label>
-          <input type="number" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-            value={form.scheduleMinutes} onChange={e => setForm({ ...form, scheduleMinutes: +e.target.value })} />
+          <label className="mb-1 block text-xs font-medium text-slate-500">执行条件</label>
+          <input
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            value={`每 ${form.scheduleMinutes} 分钟执行一次`}
+            onChange={(event) => {
+              const matched = event.target.value.match(/\d+/);
+              setForm((prev) => ({ ...prev, scheduleMinutes: matched ? Number(matched[0]) : prev.scheduleMinutes }));
+            }}
+          />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">研究重点</label>
-          <input className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-            placeholder="如：国产替代进展、大客户订单、产能扩张…"
-            value={form.analysisFocus} onChange={e => setForm({ ...form, analysisFocus: e.target.value })} />
+          <label className="mb-1 block text-xs font-medium text-slate-500">研究重点</label>
+          <input
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            placeholder="如：成本传导、国产替代、出海节奏"
+            value={form.analysisFocus}
+            onChange={(event) => setForm((prev) => ({ ...prev, analysisFocus: event.target.value }))}
+          />
         </div>
         <div className="col-span-2">
-          <label className="block text-xs font-medium text-slate-500 mb-1">描述</label>
-          <textarea className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 resize-none"
-            rows={2} placeholder="简要说明该智能体的监控目标和分析范围…"
-            value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+          <label className="mb-1 block text-xs font-medium text-slate-500">描述</label>
+          <textarea
+            className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            rows={2}
+            placeholder="简要说明该标的跟踪的监控范围与研究目标"
+            value={form.description}
+            onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
+          />
         </div>
       </div>
 
-      <div className="flex gap-3 justify-end">
-        <Button variant="outline" size="sm" onClick={onCancel}>取消</Button>
+      <div className="flex justify-end gap-3">
+        <Button variant="outline" size="sm" onClick={onCancel}>
+          取消
+        </Button>
         <Button size="sm" onClick={handleSubmit} disabled={creating} className="gap-2">
-          {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-          创建智能体
+          {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+          创建标的跟踪
         </Button>
       </div>
     </div>
   );
 }
 
-/* ─── Event Timeline ───────────────────────────────────────────────────────── */
 function EventTimeline({ events }: { events: AgentEvent[] }) {
   if (events.length === 0) {
     return (
-      <div className="text-center py-12 text-slate-400">
-        <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
-        <p className="text-sm">暂无事件，请运行智能体开始追踪</p>
+      <div className="py-12 text-center text-slate-400">
+        <Search className="mx-auto mb-2 h-8 w-8 opacity-50" />
+        <p className="text-sm">暂无事件，运行标的跟踪后会在这里展示新发现。</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
-      {events.map((evt) => {
-        const ImpactIcon = impactIcons[evt.impact_level] || Minus;
+      {events.map((event) => {
+        const ImpactIcon = impactIcons[event.impact_level] || Minus;
         return (
-          <div key={evt.id} className="flex gap-3 p-3 rounded-lg border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
-            <div className={cn('w-8 h-8 rounded-full flex items-center justify-center shrink-0 border', impactColors[evt.impact_level])}>
-              <ImpactIcon className="w-3.5 h-3.5" />
+          <div
+            key={event.id}
+            className="flex gap-3 rounded-lg border border-slate-100 bg-slate-50/60 p-3 transition-colors hover:bg-slate-50"
+          >
+            <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full border', impactColors[event.impact_level])}>
+              <ImpactIcon className="h-3.5 w-3.5" />
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-2">
-                <h4 className="text-sm font-medium text-slate-900 leading-snug">{evt.title}</h4>
-                <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0', impactColors[evt.impact_level])}>
-                  {evt.impact_level.toUpperCase()}
+                <h4 className="text-sm font-medium leading-snug text-slate-900">{event.title}</h4>
+                <span className={cn('shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium', impactColors[event.impact_level])}>
+                  {event.impact_level === 'high' ? '高' : event.impact_level === 'medium' ? '中' : '低'}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-1 line-clamp-2">{evt.summary}</p>
-              <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-400 flex-wrap">
-                {evt.event_date && <span>{evt.event_date}</span>}
-                {evt.source && (
-                  evt.source_url
-                    ? <a href={evt.source_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline flex items-center gap-0.5">· {evt.source} <ExternalLink className="w-2.5 h-2.5" /></a>
-                    : <span>· {evt.source}</span>
-                )}
-                {evt.related_entities.length > 0 && (
+              <p className="mt-1 line-clamp-2 text-xs text-slate-500">{event.summary}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
+                <span>{event.event_date}</span>
+                {event.source ? (
+                  event.source_url ? (
+                    <a
+                      href={event.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-0.5 text-blue-500 hover:underline"
+                    >
+                      · {event.source}
+                      <ExternalLink className="h-2.5 w-2.5" />
+                    </a>
+                  ) : (
+                    <span>· {event.source}</span>
+                  )
+                ) : null}
+                {event.related_entities.length > 0 ? (
                   <span className="flex items-center gap-1">
-                    · <Target className="w-2.5 h-2.5" /> {evt.related_entities.join(', ')}
+                    · <Target className="h-2.5 w-2.5" />
+                    {event.related_entities.join('、')}
                   </span>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
@@ -298,110 +839,319 @@ function EventTimeline({ events }: { events: AgentEvent[] }) {
   );
 }
 
-/* ─── Analysis Report ──────────────────────────────────────────────────────── */
-function AnalysisReport({ analysis }: { analysis: AgentAnalysis }) {
-  const [expanded, setExpanded] = useState(true);
-
-  // 安全解析数组字段（后端可能返回 JSON 字符串）
-  const keyFindings = (() => {
-    try {
-      if (!analysis.key_findings) return [];
-      if (Array.isArray(analysis.key_findings)) return analysis.key_findings;
-      if (typeof analysis.key_findings === 'string') return JSON.parse(analysis.key_findings);
-      return [];
-    } catch { return []; }
-  })();
-
-  const impactChain = (() => {
-    try {
-      if (!analysis.impact_chain) return [];
-      if (Array.isArray(analysis.impact_chain)) return analysis.impact_chain;
-      if (typeof analysis.impact_chain === 'string') return JSON.parse(analysis.impact_chain);
-      return [];
-    } catch { return []; }
-  })();
+function TransmissionNodeCard({
+  title,
+  subtitle,
+  previousPrice,
+  latestPrice,
+  objectTypeId,
+}: {
+  title: string;
+  subtitle: string;
+  previousPrice: number;
+  latestPrice: number;
+  objectTypeId: string;
+}) {
+  const accent = getTransmissionAccent(objectTypeId);
 
   return (
-    <div className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-sm">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-slate-100 flex items-start gap-3 cursor-pointer hover:bg-slate-50/50 transition-colors"
-        onClick={() => setExpanded(!expanded)}>
-        <FileText className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-slate-900 text-sm">{analysis.title}</h3>
-          <p className="text-xs text-slate-400 mt-0.5">{timeAgo(analysis.created_at)}</p>
+    <div className={cn('w-full rounded-[26px] border bg-white p-4 shadow-[0_16px_32px_rgba(15,23,42,0.08)]', accent.card)}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium', accent.badge)}>
+            <Database className="h-3 w-3" />
+            {subtitle}
+          </div>
+          <h5 className="mt-3 text-sm font-semibold text-slate-900">{title}</h5>
         </div>
-        {expanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+        <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', accent.icon)}>
+          <Network className="h-4 w-4" />
+        </div>
       </div>
 
-      {expanded && (
-        <div className="p-5 space-y-5">
-          {/* Key Findings */}
-          {keyFindings.length > 0 && (
-            <div>
-              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Zap className="w-3.5 h-3.5 text-amber-500" /> 核心发现
-              </h4>
-              <div className="space-y-1.5">
-                {keyFindings.map((f, i) => (
-                  <div key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                    <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
-                    {f}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Impact Chain */}
-          {impactChain.length > 0 && (
-            <div>
-              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-purple-500" /> 传导链路（基于本体）
-              </h4>
-              <div className="flex flex-wrap gap-2">
-                {impactChain.map((item, i) => (
-                  <div key={i} className="flex items-center gap-1 text-xs">
-                    <span className="px-2 py-1 rounded bg-blue-50 text-blue-700 font-medium border border-blue-100">{item.from}</span>
-                    <div className="flex flex-col items-center">
-                      <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-                      <span className={cn('text-[9px] px-1 rounded', impactColors[item.intensity])}>{item.mechanism}</span>
-                    </div>
-                    <span className="px-2 py-1 rounded bg-emerald-50 text-emerald-700 font-medium border border-emerald-100">{item.to}</span>
-                    {i < impactChain.length - 1 && <ChevronRight className="w-3 h-3 text-slate-300" />}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Recommendation */}
-          {analysis.recommendation && (
-            <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-100">
-              <h4 className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                <TrendingUp className="w-3.5 h-3.5" /> 投资建议
-              </h4>
-              <p className="text-sm text-slate-700">{analysis.recommendation}</p>
-            </div>
-          )}
-
-          {/* Full Report */}
-          <details className="group">
-            <summary className="text-xs font-medium text-slate-500 cursor-pointer hover:text-blue-600 flex items-center gap-1">
-              <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
-              查看完整报告
-            </summary>
-            <div className="mt-3 prose prose-sm prose-slate max-w-none text-sm leading-relaxed whitespace-pre-wrap border-t border-slate-100 pt-3">
-              {analysis.content}
-            </div>
-          </details>
+      <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/80 px-3 py-3 text-xs">
+        <p className="text-slate-400">价格变化</p>
+        <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
+          <span>{previousPrice.toFixed(2)}</span>
+          <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
+          <span>{latestPrice.toFixed(2)}</span>
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-/* ─── Agent Card ───────────────────────────────────────────────────────────── */
+function PriceTransmissionGraph({ data }: { data: PriceTransmissionData }) {
+  const chainNodes = [
+    {
+      id: 'lithium',
+      title: '碳酸锂',
+      subtitle: 'L1 / 原材料',
+      previousPrice: 12.5,
+      latestPrice: 15.63,
+      objectTypeId: 'lithium_carbonate',
+      x: 80,
+      y: 170,
+    },
+    {
+      id: 'cathode',
+      title: '正极材料',
+      subtitle: 'L2 / 正极材料',
+      previousPrice: 8.4,
+      latestPrice: 9.10,
+      objectTypeId: 'cathode_material',
+      x: 350,
+      y: 40,
+    },
+    {
+      id: 'electrolyte',
+      title: '电池电解液',
+      subtitle: 'L2 / 电池电解液',
+      previousPrice: 6.5,
+      latestPrice: 7.44,
+      objectTypeId: 'battery_electrolyte',
+      x: 350,
+      y: 290,
+    },
+    {
+      id: 'cell',
+      title: '电芯',
+      subtitle: 'L3 / 电芯',
+      previousPrice: 1.12,
+      latestPrice: 1.25,
+      objectTypeId: 'battery_cell',
+      x: 650,
+      y: 170,
+    },
+    {
+      id: 'battery',
+      title: '电池',
+      subtitle: 'L4 / 电池',
+      previousPrice: 4.8,
+      latestPrice: 5.14,
+      objectTypeId: 'power_battery',
+      x: 930,
+      y: 170,
+    },
+    {
+      id: 'vehicle',
+      title: '新能源汽车',
+      subtitle: 'L5 / 新能源整车',
+      previousPrice: 18.6,
+      latestPrice: 19.10,
+      objectTypeId: 'new_energy_vehicle',
+      x: 1210,
+      y: 170,
+    },
+  ];
+
+  const edges = [
+    { from: 'lithium', to: 'cathode', label: '传导系数 +8.3%' },
+    { from: 'lithium', to: 'electrolyte', label: '传导系数 +14.4%' },
+    { from: 'cathode', to: 'cell', label: '传导系数 +7.6%' },
+    { from: 'electrolyte', to: 'cell', label: '传导系数 +8.0%' },
+    { from: 'cell', to: 'battery', label: '传导系数 +7.1%' },
+    { from: 'battery', to: 'vehicle', label: '传导系数 +2.7%' },
+  ];
+  const CARD_WIDTH = 220;
+  const CARD_HEIGHT = 128;
+  const CANVAS_WIDTH = 1450;
+  const CANVAS_HEIGHT = 470;
+  const nodeById = Object.fromEntries(chainNodes.map((node) => [node.id, node]));
+
+  const buildPath = (fromId: string, toId: string) => {
+    const from = nodeById[fromId];
+    const to = nodeById[toId];
+    const x1 = from.x + CARD_WIDTH;
+    const y1 = from.y + CARD_HEIGHT / 2;
+    const x2 = to.x;
+    const y2 = to.y + CARD_HEIGHT / 2;
+    const dx = x2 - x1;
+    const c1x = x1 + dx * 0.4;
+    const c2x = x2 - dx * 0.4;
+    return `M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}`;
+  };
+
+  const labelPosition = (fromId: string, toId: string, offsetY = -14) => {
+    const from = nodeById[fromId];
+    const to = nodeById[toId];
+    const x1 = from.x + CARD_WIDTH;
+    const y1 = from.y + CARD_HEIGHT / 2;
+    const x2 = to.x;
+    const y2 = to.y + CARD_HEIGHT / 2;
+    return {
+      x: (x1 + x2) / 2,
+      y: (y1 + y2) / 2 + offsetY,
+    };
+  };
+
+  const edgeColor = (fromId: string) => {
+    return getTransmissionAccent(nodeById[fromId].objectTypeId).badge.includes('emerald')
+      ? '#4ade80'
+      : getTransmissionAccent(nodeById[fromId].objectTypeId).badge.includes('violet')
+        ? '#a78bfa'
+        : getTransmissionAccent(nodeById[fromId].objectTypeId).badge.includes('cyan')
+          ? '#67e8f9'
+          : '#93c5fd';
+  };
+
+  return (
+    <div className="space-y-5 rounded-[28px] border border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_45%),linear-gradient(180deg,_#f8fbff_0%,_#ffffff_100%)] p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h5 className="text-sm font-semibold text-slate-900">价格传导图</h5>
+          <p className="mt-1 text-xs text-slate-500">以本体图谱风格展示碳酸锂价格下探如何沿材料、电芯、电池一路传导到整车端。</p>
+        </div>
+        <div className="flex gap-2">
+          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-right shadow-sm">
+            <p className="text-[11px] text-slate-400">传导节点</p>
+            <p className="text-sm font-semibold text-slate-900">6</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-right shadow-sm">
+            <p className="text-[11px] text-slate-400">源头涨幅</p>
+            <p className="text-sm font-semibold text-red-600">{formatSignedNumber(data.sourceInstance.priceChangePercent)}%</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-[28px] border border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.12),_transparent_55%),#f8fafc] p-6">
+        <div className="relative" style={{ width: `${CANVAS_WIDTH}px`, height: `${CANVAS_HEIGHT}px` }}>
+          <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`} fill="none">
+            {edges.map((edge) => {
+              const color = edgeColor(edge.from);
+              const label = labelPosition(edge.from, edge.to);
+              return (
+                <g key={`${edge.from}-${edge.to}`}>
+                  <path d={buildPath(edge.from, edge.to)} stroke={color} strokeWidth="12" strokeLinecap="round" strokeOpacity="0.16" />
+                  <path d={buildPath(edge.from, edge.to)} stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeDasharray="7 7" />
+                  <g transform={`translate(${label.x}, ${label.y}) rotate(-20)`}>
+                    <rect x="-54" y="-12" width="108" height="24" rx="12" fill="white" fillOpacity="0.95" stroke="#e2e8f0" />
+                    <text textAnchor="middle" dominantBaseline="middle" fontSize="11" fontWeight="700" fill="#64748b">
+                      {edge.label}
+                    </text>
+                  </g>
+                </g>
+              );
+            })}
+          </svg>
+
+          {edges.map((edge) => {
+            return null;
+          })}
+
+          {chainNodes.map((node) => (
+            <div
+              key={node.id}
+              className="absolute z-10"
+              style={{
+                left: `${node.x}px`,
+                top: `${node.y}px`,
+                width: `${CARD_WIDTH}px`,
+              }}
+            >
+                <TransmissionNodeCard
+                  title={node.title}
+                  subtitle={node.subtitle}
+                  previousPrice={node.previousPrice}
+                  latestPrice={node.latestPrice}
+                  objectTypeId={node.objectTypeId}
+                />
+            </div>
+          ))}
+
+          <div className="mt-6 flex items-center justify-between px-2 text-[11px] text-slate-400">
+            <span>原材料价格先上行，再逐级传导到中游与终端。</span>
+            <span>传导系数为静态演示数据，用于说明价格影响路径。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AnalysisReport({ analysis }: { analysis: AgentAnalysis }) {
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div
+        className="flex cursor-pointer items-start gap-3 border-b border-slate-100 px-5 py-4 transition-colors hover:bg-slate-50/50"
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <FileText className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-slate-900">{analysis.title}</h3>
+          {!analysis.transmissionData ? <p className="mt-0.5 text-xs text-slate-400">{timeAgo(analysis.created_at)}</p> : null}
+        </div>
+        {expanded ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+      </div>
+
+      {expanded ? (
+        <div className="space-y-5 p-5">
+          {analysis.key_findings.length > 0 ? (
+            <div>
+              <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <Zap className="h-3.5 w-3.5 text-amber-500" />
+                核心结论
+              </h4>
+              <div className="space-y-1.5">
+                {analysis.key_findings.map((finding, index) => (
+                  <div key={finding} className="flex items-start gap-2 text-sm text-slate-700">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
+                      {index + 1}
+                    </span>
+                    {finding}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {analysis.transmissionData ? (
+            <div>
+              <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <Activity className="h-3.5 w-3.5 text-purple-500" />
+                影响链路
+              </h4>
+              <PriceTransmissionGraph data={analysis.transmissionData} />
+            </div>
+          ) : analysis.impact_chain.length > 0 ? (
+            <div>
+              <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <Activity className="h-3.5 w-3.5 text-purple-500" />
+                影响链路
+              </h4>
+              <div className="flex flex-wrap gap-2">
+                {analysis.impact_chain.map((item, index) => (
+                  <div key={`${item.from}-${item.to}-${index}`} className="flex items-center gap-1 text-xs">
+                    <span className="rounded border border-blue-100 bg-blue-50 px-2 py-1 font-medium text-blue-700">{item.from}</span>
+                    <div className="flex flex-col items-center">
+                      <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
+                      <span className={cn('rounded px-1 text-[9px]', impactColors[item.intensity])}>{item.mechanism}</span>
+                    </div>
+                    <span className="rounded border border-emerald-100 bg-emerald-50 px-2 py-1 font-medium text-emerald-700">{item.to}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {analysis.recommendation ? (
+            <div className="rounded-lg border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3">
+              <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-700">
+                <TrendingUp className="h-3.5 w-3.5" />
+                研究建议
+              </h4>
+              <p className="text-sm text-slate-700">{analysis.recommendation}</p>
+            </div>
+          ) : null}
+
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function AgentCard({
   agent,
   selected,
@@ -423,52 +1173,70 @@ function AgentCard({
     <div
       onClick={onSelect}
       className={cn(
-        'p-4 rounded-xl border cursor-pointer transition-all hover:shadow-sm',
-        selected ? 'border-blue-300 bg-blue-50/50 shadow-sm ring-1 ring-blue-200' : 'border-slate-200 bg-white hover:border-slate-300'
+        'cursor-pointer rounded-xl border p-4 transition-all hover:shadow-sm',
+        selected ? 'border-blue-300 bg-blue-50/50 shadow-sm ring-1 ring-blue-200' : 'border-slate-200 bg-white hover:border-slate-300',
       )}
     >
-      <div className="flex items-start justify-between mb-2">
+      <div className="mb-2 flex items-start justify-between">
         <div className="flex items-center gap-2">
-          <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center',
-            agent.is_active ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400')}>
-            <Bot className="w-4 h-4" />
+          <div className={cn('flex h-8 w-8 items-center justify-center rounded-lg', agent.is_active ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400')}>
+            <Bot className="h-4 w-4" />
           </div>
           <div>
-            <h3 className="font-semibold text-sm text-slate-900">{agent.name}</h3>
+            <h3 className="text-sm font-semibold text-slate-900">{agent.name}</h3>
             <p className="text-[11px] text-slate-400">{agent.target_company}</p>
           </div>
         </div>
-        <button onClick={e => { e.stopPropagation(); onToggle(); }}
-          className="text-slate-400 hover:text-slate-600">
-          {agent.is_active
-            ? <ToggleRight className="w-6 h-6 text-emerald-500" />
-            : <ToggleLeft className="w-6 h-6" />}
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle();
+          }}
+          className="text-slate-400 hover:text-slate-600"
+        >
+          {agent.is_active ? <ToggleRight className="h-6 w-6 text-emerald-500" /> : <ToggleLeft className="h-6 w-6" />}
         </button>
       </div>
 
-      <p className="text-xs text-slate-500 line-clamp-2 mb-3">{agent.description || agent.analysis_focus || '暂无描述'}</p>
+      <p className="mb-3 line-clamp-2 text-xs text-slate-500">{agent.description || agent.analysis_focus || '暂无描述'}</p>
 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-[10px] text-slate-400">
           <span className="flex items-center gap-1">
-            <Clock className="w-3 h-3" />
+            <Clock className="h-3 w-3" />
             {agent.last_run_at ? timeAgo(agent.last_run_at) : '从未执行'}
           </span>
-          {agent.schedule_minutes > 0 && (
+          {agent.schedule_minutes > 0 ? (
             <span className="flex items-center gap-1">
-              · <RefreshCw className="w-3 h-3" /> 每 {agent.schedule_minutes}分钟
+              · <RefreshCw className="h-3 w-3" />
+              {agent.id === 'demo_agent_lithium' ? '价格波动 5% 以上' : `每 ${agent.schedule_minutes} 分钟`}
             </span>
-          )}
+          ) : null}
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={e => { e.stopPropagation(); onRun(); }}
-            disabled={running} className="h-6 px-2 text-[11px] gap-1">
-            {running ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-            执行
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRun();
+            }}
+            disabled={running}
+            className="h-6 gap-1 px-2 text-[11px]"
+          >
+            {running ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            运行
           </Button>
-          <Button variant="ghost" size="sm" onClick={e => { e.stopPropagation(); onDelete(); }}
-            className="h-6 px-2 text-[11px] text-red-500 hover:text-red-700 hover:bg-red-50">
-            <Trash2 className="w-3 h-3" />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete();
+            }}
+            className="h-6 px-2 text-[11px] text-red-500 hover:bg-red-50 hover:text-red-700"
+          >
+            <Trash2 className="h-3 w-3" />
           </Button>
         </div>
       </div>
@@ -476,43 +1244,221 @@ function AgentCard({
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════ */
-/* ─── Main Component ───────────────────────────────────────────────────────── */
-/* ═══════════════════════════════════════════════════════════════════════════ */
+function EventInsightCard({ event }: { event: HotEventItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const insight = getEventInsight(event.title);
 
-/* ─── Ontology Q&A Panel ────────────────────────────────────────────────────── */
+  if (!insight) {
+    return <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm leading-7 text-slate-700">{event.commentary}</div>;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+              {insight.badge}
+            </span>
+            <h3 className="mt-3 text-lg font-bold text-slate-900">{insight.title}</h3>
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">{insight.conclusion}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900"
+          >
+            {expanded ? '收起全文' : '展开全文'}
+            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expanded ? 'rotate-180' : 'rotate-0')} />
+          </button>
+        </div>
+      </div>
+
+      <div className="p-5">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="mt-2 text-sm font-semibold text-slate-900">{insight.conclusion}</div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {insight.summaryItems.map((item) => (
+              <div key={item.label} className="rounded-xl border border-white bg-white p-3 shadow-sm">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{item.label}</div>
+                <div className="mt-1 text-sm leading-6 text-slate-700">{item.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {expanded ? (
+          <article className="mt-5 space-y-6">
+            {insight.sections.map((section) => (
+              <section key={section.title} className="space-y-3">
+                <h4 className="text-base font-semibold text-slate-900">{section.title}</h4>
+                {section.paragraphs.map((paragraph) => (
+                  <p key={paragraph} className="text-sm leading-7 text-slate-700">
+                    {paragraph}
+                  </p>
+                ))}
+                {section.bullets?.length ? (
+                  <ul className="space-y-2">
+                    {section.bullets.map((bullet) => (
+                      <li key={bullet} className="flex items-start gap-2 text-sm leading-7 text-slate-700">
+                        <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                        <span>{bullet}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
+            ))}
+          </article>
+        ) : (
+          <p className="mt-4 text-sm leading-7 text-slate-700">{event.commentary}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HotEventInterpretationPanel() {
+  const [selectedId, setSelectedId] = useState<string | null>(MOCK_HOT_EVENTS[0]?.id || null);
+  const events = useMemo(() => [...MOCK_HOT_EVENTS], []);
+  const selectedEvent = events.find((item) => item.id === selectedId) || null;
+
+  return (
+    <div className="flex h-full min-h-0">
+      <aside className="w-80 shrink-0 border-r border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-5 py-4">
+          <div className="flex items-center gap-2 font-semibold text-slate-900">
+            <Flame className="h-4 w-4 text-red-500" />
+            事件跟踪
+          </div>
+          <p className="mt-1 text-xs text-slate-500">按事件跟踪影响路径、重点标的和研究员视角的事件点评。</p>
+        </div>
+        <div className="h-[calc(100%-73px)] space-y-2 overflow-y-auto p-3">
+          {events.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setSelectedId(item.id)}
+              className={cn(
+                'w-full rounded-xl border px-3 py-3 text-left transition-colors',
+                selectedId === item.id ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50',
+              )}
+            >
+              <div className="line-clamp-2 text-sm font-medium text-slate-900">{item.title}</div>
+              <div className="mt-2 text-[11px] text-slate-400">{item.occurredAt}</div>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <section className="min-w-0 flex-1 overflow-y-auto bg-slate-50 p-6">
+        {!selectedEvent ? (
+          <div className="flex h-full items-center justify-center text-slate-400">暂无热点事件</div>
+        ) : (
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-600">
+                  {selectedEvent.category}
+                </span>
+                <span className="text-xs text-slate-400">{selectedEvent.occurredAt}</span>
+              </div>
+              <h2 className="mt-3 text-2xl font-bold text-slate-900">{selectedEvent.title}</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{selectedEvent.summary}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {selectedEvent.tags.map((tag) => (
+                  <span key={tag} className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {selectedEvent.targetCompanies.length > 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-3 font-semibold text-slate-900">重点标的</div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {selectedEvent.targetCompanies.map((company) => (
+                    <div key={company} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800">
+                      {company}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center gap-2 font-semibold text-slate-900">
+                <Activity className="h-4 w-4 text-purple-500" />
+                事件传导图
+              </div>
+              <EventPropagationExplorer eventTitle={selectedEvent.title} />
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-3 font-semibold text-slate-900">事件解读</div>
+              <EventInsightCard event={selectedEvent} />
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 const QA_STORAGE_KEY = 'ontology_qa_history';
-interface QAMessage { role: 'user' | 'assistant'; text: string; sources?: { uri: string; title: string }[]; chain?: any[]; entities?: string[]; streaming?: boolean; }
+
+interface QAMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  sources?: { uri: string; title: string }[];
+  chain?: { step: number; from: string; to: string; mechanism: string; impact: string }[];
+  entities?: string[];
+  streaming?: boolean;
+}
 
 function loadQAMessages(): QAMessage[] {
   try {
     const raw = localStorage.getItem(QA_STORAGE_KEY);
     return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
-function saveQAMessages(msgs: QAMessage[]) {
-  try { localStorage.setItem(QA_STORAGE_KEY, JSON.stringify(msgs)); } catch {}
+function saveQAMessages(messages: QAMessage[]) {
+  try {
+    localStorage.setItem(QA_STORAGE_KEY, JSON.stringify(messages));
+  } catch {
+    // ignore
+  }
 }
 
-function OntologyQAPanel({
-  messages,
-  setMessages,
-  loading,
-  setLoading,
-  agentId,
-}: {
-  messages: QAMessage[];
-  setMessages: React.Dispatch<React.SetStateAction<QAMessage[]>>;
-  loading: boolean;
-  setLoading: (v: boolean) => void;
-  agentId: string | null;
-}) {
+export function OntologyQAPanel({ fallbackAgentId }: { fallbackAgentId?: string }) {
   const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<QAMessage[]>(loadQAMessages);
+  const [loading, setLoading] = useState(false);
+  const [agentId, setAgentId] = useState<string | null>(fallbackAgentId || null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  useEffect(() => {
+    api
+      .getResearchAgents()
+      .then((result) => {
+        if (result.agents?.length) {
+          setAgentId(result.agents[0].id);
+        } else if (fallbackAgentId) {
+          setAgentId(fallbackAgentId);
+        }
+      })
+      .catch(() => {
+        if (fallbackAgentId) setAgentId(fallbackAgentId);
+      });
+  }, [fallbackAgentId]);
 
   const SUGGESTIONS = [
     '新能源车原材料价格上涨，对产业链上下游企业业绩和股价有何影响？',
@@ -522,68 +1468,61 @@ function OntologyQAPanel({
   ];
 
   const addMessages = (updater: (prev: QAMessage[]) => QAMessage[]) => {
-    setMessages(prev => {
+    setMessages((prev) => {
       const next = updater(prev);
       saveQAMessages(next);
       return next;
     });
   };
 
-  const send = async (q?: string) => {
-    const question = (q || input).trim();
-    if (!question || loading || !agentId) return;
-    setInput('');
-    addMessages(prev => [...prev, { role: 'user', text: question }]);
-    setLoading(true);
+  const send = async (nextQuestion?: string) => {
+    const question = (nextQuestion || input).trim();
+    if (!question || loading) return;
+    if (!agentId) {
+      toast.error('当前没有可用的问答上下文');
+      return;
+    }
 
+    setInput('');
+    addMessages((prev) => [...prev, { role: 'user', text: question }]);
+    setLoading(true);
     abortRef.current = new AbortController();
+
     try {
       let fullResponse = '';
-      
-      // 添加一个临时的assistant消息用于显示流式内容
-      addMessages(prev => [...prev, { role: 'assistant', text: '', streaming: true }]);
+      addMessages((prev) => [...prev, { role: 'assistant', text: '', streaming: true }]);
 
       for await (const chunk of streamResearchChat(agentId, question)) {
-        // Check if aborted
-        if (abortRef.current?.signal.aborted) {
-          break;
-        }
-
-        if (chunk.error) {
-          throw new Error(chunk.error);
-        }
+        if (abortRef.current?.signal.aborted) break;
+        if (chunk.error) throw new Error(chunk.error);
 
         if (chunk.content) {
           fullResponse += chunk.content;
-          // 更新流式消息内容
-          addMessages(prev => {
-            const newMsgs = [...prev];
-            const lastMsg = newMsgs[newMsgs.length - 1];
-            if (lastMsg && lastMsg.role === 'assistant' && lastMsg.streaming) {
-              lastMsg.text = fullResponse;
+          addMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last && last.role === 'assistant' && last.streaming) {
+              last.text = fullResponse;
             }
-            return newMsgs;
+            return next;
           });
         }
 
-        if (chunk.done) {
-          break;
-        }
+        if (chunk.done) break;
       }
 
-      // 完成流式输出，更新最终消息
-      addMessages(prev => {
-        const newMsgs = [...prev];
-        const lastMsg = newMsgs[newMsgs.length - 1];
-        if (lastMsg && lastMsg.role === 'assistant') {
-          lastMsg.streaming = false;
-          lastMsg.text = fullResponse;
+      addMessages((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last && last.role === 'assistant') {
+          last.streaming = false;
+          last.text = fullResponse;
         }
-        return newMsgs;
+        return next;
       });
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        addMessages(prev => [...prev, { role: 'assistant', text: `Error: ${err.message}` }]);
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        addMessages((prev) => [...prev, { role: 'assistant', text: `出错了：${error.message}` }]);
       }
     } finally {
       setLoading(false);
@@ -591,7 +1530,10 @@ function OntologyQAPanel({
     }
   };
 
-  const stop = () => { abortRef.current?.abort(); setLoading(false); };
+  const stop = () => {
+    abortRef.current?.abort();
+    setLoading(false);
+  };
 
   const clearHistory = () => {
     addMessages(() => []);
@@ -599,125 +1541,98 @@ function OntologyQAPanel({
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-5 py-3 border-b border-slate-200 bg-gradient-to-r from-blue-50 to-white shrink-0 flex items-center justify-between">
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-gradient-to-r from-blue-50 to-white px-5 py-3">
         <div>
-          <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-            <Network className="w-4 h-4 text-blue-600" />
+          <h3 className="flex items-center gap-2 font-semibold text-slate-900">
+            <Network className="h-4 w-4 text-blue-600" />
             产业图谱智能问答
           </h3>
-          <p className="text-xs text-slate-500 mt-0.5">基于本体图谱逻辑 + 实时市场数据，回答产业链开放性问题</p>
+          <p className="mt-0.5 text-xs text-slate-500">基于本体图谱逻辑 + 实时市场数据，回答产业链开放性问题</p>
         </div>
-        {messages.length > 0 && (
+        {messages.length > 0 ? (
           <button
             onClick={clearHistory}
-            className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-50 transition-colors"
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
           >
-            <Trash2 className="w-3 h-3" /> 清空
+            <Trash2 className="h-3 w-3" />
+            清空
           </button>
-        )}
+        ) : null}
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
+      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        {messages.length === 0 ? (
           <div className="space-y-3">
-            <p className="text-xs text-slate-400 text-center py-4">选择一个问题开始，或自己输入</p>
-            {SUGGESTIONS.map((s, i) => (
-              <button key={i} onClick={() => send(s)}
-                className="w-full text-left text-sm text-slate-700 bg-white border border-slate-200 rounded-lg px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors">
-                {s}
+            <p className="py-4 text-center text-xs text-slate-400">选择一个问题开始，或自己输入</p>
+            {SUGGESTIONS.map((suggestion) => (
+              <button
+                key={suggestion}
+                onClick={() => send(suggestion)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:border-blue-300 hover:bg-blue-50"
+              >
+                {suggestion}
               </button>
             ))}
           </div>
-        )}
+        ) : null}
 
-        {messages.map((m, i) => (
-          <div key={i} className={cn('flex gap-3', m.role === 'user' ? 'flex-row-reverse' : 'flex-row')}>
-            <div className={cn('w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold',
-              m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gradient-to-br from-purple-500 to-blue-600 text-white')}>
-              {m.role === 'user' ? 'U' : 'AI'}
-            </div>
-            <div className={cn('flex-1 max-w-[85%]', m.role === 'user' ? 'items-end flex flex-col' : '')}>
-              <div className={cn('rounded-xl px-4 py-3 text-sm',
-                m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-800')}>
-                <div className="whitespace-pre-wrap leading-relaxed">{m.text}</div>
-              </div>
-
-              {/* Reasoning chain */}
-              {m.chain && m.chain.length > 0 && (
-                <div className="mt-2 p-3 bg-amber-50 border border-amber-100 rounded-lg">
-                  <div className="text-[10px] font-semibold text-amber-700 mb-2 uppercase tracking-wider">传导路径</div>
-                  <div className="space-y-1">
-                    {m.chain.map((step: any, si: number) => (
-                      <div key={si} className="flex items-center gap-1.5 text-xs">
-                        <span className="text-slate-500 shrink-0">{step.step}.</span>
-                        <span className="font-medium text-slate-700">{step.from}</span>
-                        <ArrowRight className="w-3 h-3 text-amber-500 shrink-0" />
-                        <span className="font-medium text-slate-700">{step.to}</span>
-                        <span className="text-slate-400">· {step.mechanism}</span>
-                        <span className={cn('ml-auto text-[10px] px-1.5 py-0.5 rounded',
-                          step.impact === 'high' ? 'bg-red-100 text-red-600' : step.impact === 'medium' ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600')}>
-                          {step.impact}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+        {messages.map((message, index) => (
+          <div key={`${message.role}-${index}`} className={cn('flex gap-3', message.role === 'user' ? 'flex-row-reverse' : 'flex-row')}>
+            <div
+              className={cn(
+                'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold',
+                message.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gradient-to-br from-purple-500 to-blue-600 text-white',
               )}
-
-              {/* Entities + sources */}
-              {(m.entities?.length || m.sources?.length) ? (
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {m.entities?.map((e, ei) => (
-                    <span key={ei} className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">
-                      {e}
-                    </span>
-                  ))}
-                  {m.sources?.slice(0, 3).map((s, si) => (
-                    <a key={si} href={s.uri} target="_blank" rel="noopener noreferrer"
-                      className="text-[10px] bg-slate-50 text-slate-500 px-1.5 py-0.5 rounded border border-slate-100 hover:text-blue-600 flex items-center gap-0.5">
-                      <LinkIcon className="w-2.5 h-2.5" />
-                      {s.title?.slice(0, 20) || '来源'}
-                    </a>
-                  ))}
-                </div>
-              ) : null}
+            >
+              {message.role === 'user' ? 'U' : 'AI'}
+            </div>
+            <div className={cn('flex max-w-[85%] flex-1', message.role === 'user' ? 'justify-end' : 'justify-start')}>
+              <div
+                className={cn(
+                  'rounded-xl px-4 py-3 text-sm',
+                  message.role === 'user' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-800',
+                )}
+              >
+                <div className="whitespace-pre-wrap leading-relaxed">{message.text}</div>
+              </div>
             </div>
           </div>
         ))}
 
-        {loading && (
+        {loading ? (
           <div className="flex gap-3">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">AI</div>
-            <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-blue-600 text-xs font-bold text-white">AI</div>
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
               <span className="text-sm text-slate-500">正在搜索和分析...</span>
             </div>
           </div>
-        )}
+        ) : null}
         <div ref={endRef} />
       </div>
 
-      {/* Input */}
-      <div className="p-3 border-t border-slate-200 shrink-0">
+      <div className="shrink-0 border-t border-slate-200 p-3">
         <div className="flex gap-2">
           <input
-            className="flex-1 h-10 px-3 text-sm border border-slate-200 rounded-lg focus:border-blue-400 focus:ring-2 focus:ring-blue-100 outline-none"
+            className="h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
             placeholder="输入产业链相关问题..."
             value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) send();
+            }}
             disabled={loading}
           />
           {loading ? (
-            <Button size="sm" variant="outline" onClick={stop} className="h-10 gap-1.5 text-red-600 border-red-200 hover:bg-red-50">
-              <Square className="w-3.5 h-3.5" /> 停止
+            <Button size="sm" variant="outline" onClick={stop} className="h-10 gap-1.5 border-red-200 text-red-600 hover:bg-red-50">
+              <Square className="h-3.5 w-3.5" />
+              停止
             </Button>
           ) : (
             <Button size="sm" onClick={() => send()} disabled={!input.trim()} className="h-10 gap-1.5">
-              <Send className="w-3.5 h-3.5" /> 发送
+              <Send className="h-3.5 w-3.5" />
+              发送
             </Button>
           )}
         </div>
@@ -726,290 +1641,321 @@ function OntologyQAPanel({
   );
 }
 
-/* ─── Main Component ───────────────────────────────────────────────────────── */
-/* ═══════════════════════════════════════════════════════════════════════════ */
-
 export function AgentStudio() {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [analyses, setAnalyses] = useState<AgentAnalysis[]>([]);
+  const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
+  const [eventsByAgent, setEventsByAgent] = useState<Record<string, AgentEvent[]>>(MOCK_EVENTS);
+  const [analysesByAgent, setAnalysesByAgent] = useState<Record<string, AgentAnalysis[]>>(MOCK_ANALYSES);
+  const [selectedId, setSelectedId] = useState<string | null>(MOCK_AGENTS[0]?.id || null);
   const [showCreate, setShowCreate] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'events' | 'analyses'>('analyses');
-  const [mainTab, setMainTab] = useState<'agents' | 'qa'>('agents');
+  const [mainTab, setMainTab] = useState<'agents' | 'hot' | 'qa'>('agents');
 
-  // Q&A state lifted here so it survives tab switches; persisted to localStorage
-  const [qaMessages, setQaMessages] = useState<QAMessage[]>(loadQAMessages);
-  const [qaLoading, setQaLoading] = useState(false);
+  const selectedAgent = useMemo(() => agents.find((agent) => agent.id === selectedId) || null, [agents, selectedId]);
+  const isPriceTrackingAgent = selectedAgent?.id === 'demo_agent_lithium';
+  const events = selectedId ? eventsByAgent[selectedId] || [] : [];
+  const analyses = selectedId ? analysesByAgent[selectedId] || [] : [];
 
-  const selectedAgent = agents.find(a => a.id === selectedId) || null;
-
-  /* ── Load agents ─────────────────────────────────────────────────────────── */
   useEffect(() => {
-    api.getResearchAgents()
-      .then(res => {
-        setAgents(res.agents);
-        if (res.agents.length > 0) setSelectedId(res.agents[0].id);
-      })
-      .catch(err => toast.error(err.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  /* ── Load events & analyses when selection changes ───────────────────────── */
-  useEffect(() => {
-    if (!selectedId) { setEvents([]); setAnalyses([]); return; }
-    Promise.all([
-      api.getAgentEvents(selectedId),
-      api.getAgentAnalyses(selectedId),
-    ]).then(([evtRes, anaRes]) => {
-      setEvents(evtRes.events);
-      setAnalyses(anaRes.analyses);
-    }).catch(err => toast.error(err.message));
-  }, [selectedId]);
-
-  /* ── Handlers ────────────────────────────────────────────────────────────── */
-  const handleToggle = async (agent: Agent) => {
-    try {
-      const res = await api.updateResearchAgent(agent.id, { is_active: !agent.is_active });
-      setAgents(prev => prev.map(a => a.id === agent.id ? res.agent : a));
-      toast.success(res.agent.is_active ? '智能体已启动' : '智能体已暂停');
-    } catch (err: any) {
-      toast.error(err.message);
+    if (selectedAgent?.id === 'demo_agent_lithium' && detailTab !== 'analyses') {
+      setDetailTab('analyses');
     }
+  }, [detailTab, selectedAgent]);
+
+  const handleToggle = (agent: Agent) => {
+    setAgents((prev) =>
+      prev.map((item) =>
+        item.id === agent.id
+          ? { ...item, is_active: item.is_active ? 0 : 1, updated_at: formatDateTime(new Date()) }
+          : item,
+      ),
+    );
+    toast.success(agent.is_active ? '已暂停标的跟踪' : '已启用标的跟踪');
   };
 
   const handleRun = async (agentId: string) => {
     setRunning(agentId);
-    try {
-      const result = await api.runResearchAgent(agentId);
-      toast.success(`发现 ${result.events?.length || 0} 个事件，已生成分析报告`);
-      // Refresh data
-      const [evtRes, anaRes] = await Promise.all([
-        api.getAgentEvents(agentId),
-        api.getAgentAnalyses(agentId),
-      ]);
-      setEvents(evtRes.events);
-      setAnalyses(anaRes.analyses);
-      // Update agent last_run_at
-      const agentsRes = await api.getResearchAgents();
-      setAgents(agentsRes.agents);
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      setRunning(null);
-    }
-  };
+    await wait(5000);
+    const agent = agents.find((item) => item.id === agentId) || null;
+    const shouldSeedDemo = agent && (eventsByAgent[agentId] || []).length === 0 && (analysesByAgent[agentId] || []).length === 0;
+    const starterEvent = shouldSeedDemo && agent ? createStarterEvent(agent) : null;
+    const starterAnalysis = shouldSeedDemo && agent && starterEvent ? createStarterAnalysis(agent, starterEvent) : null;
 
-  const handleDelete = async (agentId: string) => {
-    try {
-      await api.deleteResearchAgent(agentId);
-      setAgents(prev => prev.filter(a => a.id !== agentId));
-      if (selectedId === agentId) {
-        setSelectedId(agents.find(a => a.id !== agentId)?.id || null);
-      }
-      toast.success('智能体已删除');
-    } catch (err: any) {
-      toast.error(err.message);
-    }
-  };
-
-  /* ── Render ──────────────────────────────────────────────────────────────── */
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64 gap-3 text-slate-500">
-        <Loader2 className="w-5 h-5 animate-spin" />
-        加载中...
-      </div>
+    setAgents((prev) =>
+      prev.map((agent) =>
+        agent.id === agentId
+          ? {
+              ...agent,
+              last_run_at: formatDateTime(new Date()),
+              updated_at: formatDateTime(new Date()),
+            }
+          : agent,
+      ),
     );
-  }
+
+    setEventsByAgent((prev) => {
+      if (!starterEvent) return prev;
+      return { ...prev, [agentId]: [starterEvent] };
+    });
+
+    setAnalysesByAgent((prev) => {
+      if (!starterAnalysis) return prev;
+      return { ...prev, [agentId]: [starterAnalysis] };
+    });
+
+    setRunning(null);
+    toast.success('数据已刷新');
+  };
+
+  const handleDelete = (agentId: string) => {
+    const remainingAgents = agents.filter((agent) => agent.id !== agentId);
+    setAgents(remainingAgents);
+    setEventsByAgent((prev) => {
+      const next = { ...prev };
+      delete next[agentId];
+      return next;
+    });
+    setAnalysesByAgent((prev) => {
+      const next = { ...prev };
+      delete next[agentId];
+      return next;
+    });
+    setSelectedId((prev) => (prev === agentId ? remainingAgents[0]?.id || null : prev));
+    toast.success('标的跟踪已删除');
+  };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8.5rem)] -m-6">
-      {/* ── Top Tab Bar ─────────────────────────────────────────────────────── */}
-      <div className="flex border-b border-slate-200 bg-white px-6 shrink-0">
+    <div className="flex h-[calc(100vh-8.5rem)] flex-col -m-6">
+      <div className="flex shrink-0 border-b border-slate-200 bg-white px-6">
         <button
           onClick={() => setMainTab('agents')}
-          className={cn('flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors',
-            mainTab === 'agents' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700')}
+          className={cn(
+            'flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors',
+            mainTab === 'agents' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700',
+          )}
         >
-          <Bot className="w-4 h-4" /> 标的跟踪
+          <Bot className="h-4 w-4" />
+          标的跟踪
+        </button>
+        <button
+          onClick={() => setMainTab('hot')}
+          className={cn(
+            'flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors',
+            mainTab === 'hot' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700',
+          )}
+        >
+          <Flame className="h-4 w-4" />
+          事件跟踪
         </button>
         <button
           onClick={() => setMainTab('qa')}
-          className={cn('flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors',
-            mainTab === 'qa' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700')}
+          className={cn(
+            'flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors',
+            mainTab === 'qa' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700',
+          )}
         >
-          <MessageSquare className="w-4 h-4" /> 产业链问答
+          <MessageSquare className="h-4 w-4" />
+          产业链智能问答
         </button>
       </div>
 
-      {/* ── Q&A Panel ───────────────────────────────────────────────────────── */}
-      <div className={cn('flex-1 min-h-0', mainTab !== 'qa' && 'hidden')}>
-        <OntologyQAPanel
-          messages={qaMessages}
-          setMessages={setQaMessages}
-          loading={qaLoading}
-          setLoading={setQaLoading}
-          agentId={selectedId}
-        />
+      <div className={cn('flex-1 min-h-0', mainTab !== 'hot' && 'hidden')}>
+        <HotEventInterpretationPanel />
       </div>
 
-      {/* ── Agents Panel ────────────────────────────────────────────────────── */}
-      <div className={cn('flex-1 flex gap-6 min-h-0 p-6', mainTab !== 'agents' && 'hidden')}>
-      <div className="w-80 shrink-0 flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <Bot className="w-5 h-5 text-blue-600" />
-            标的跟踪
-          </h2>
-          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => setShowCreate(true)}>
-            <Plus className="w-3 h-3" /> 新建
-          </Button>
+      <div className={cn('flex-1 min-h-0', mainTab !== 'qa' && 'hidden')}>
+        <OntologyQAPanel fallbackAgentId={agents[0]?.id} />
+      </div>
+
+      <div className={cn('flex min-h-0 flex-1 gap-6 p-6', mainTab !== 'agents' && 'hidden')}>
+        <div className="flex w-80 shrink-0 flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+              <Bot className="h-5 w-5 text-blue-600" />
+              标的跟踪
+            </h2>
+            <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => setShowCreate(true)}>
+              <Plus className="h-3 w-3" />
+              新建
+            </Button>
+          </div>
+
+          {showCreate ? (
+            <CreateAgentForm
+              onCreated={(agent) => {
+                setAgents((prev) => [agent, ...prev]);
+                setSelectedId(agent.id);
+                setEventsByAgent((prev) => ({ ...prev, [agent.id]: [] }));
+                setAnalysesByAgent((prev) => ({ ...prev, [agent.id]: [] }));
+                setShowCreate(false);
+              }}
+              onCancel={() => setShowCreate(false)}
+            />
+          ) : null}
+
+          <div className="flex-1 space-y-2 overflow-y-auto pr-1">
+            {agents.length === 0 && !showCreate ? (
+              <div className="py-16 text-center text-slate-400">
+                <Bot className="mx-auto mb-3 h-10 w-10 opacity-30" />
+                <p className="text-sm font-medium">还没有标的跟踪</p>
+                <p className="mt-1 text-xs">创建一个标的跟踪后，就能开始持续发现事件</p>
+                <Button size="sm" className="mt-4 gap-1" onClick={() => setShowCreate(true)}>
+                  <Plus className="h-3 w-3" />
+                  创建标的跟踪
+                </Button>
+              </div>
+            ) : (
+              agents.map((agent) => (
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
+                  selected={selectedId === agent.id}
+                  onSelect={() => setSelectedId(agent.id)}
+                  onToggle={() => handleToggle(agent)}
+                  onRun={() => handleRun(agent.id)}
+                  onDelete={() => handleDelete(agent.id)}
+                  running={running === agent.id}
+                />
+              ))
+            )}
+          </div>
         </div>
 
-        {showCreate && (
-          <CreateAgentForm
-            onCreated={(a) => {
-              setAgents(prev => [a, ...prev]);
-              setSelectedId(a.id);
-              setShowCreate(false);
-            }}
-            onCancel={() => setShowCreate(false)}
-          />
-        )}
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {selectedAgent ? (
+            <>
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={cn(
+                        'flex h-10 w-10 items-center justify-center rounded-xl',
+                        selectedAgent.is_active ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400',
+                      )}
+                    >
+                      <Bot className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900">{selectedAgent.name}</h2>
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <Building2 className="h-3 w-3" />
+                        {selectedAgent.target_company} · {selectedAgent.target_industry}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        'rounded-full px-2 py-1 text-xs font-medium',
+                        selectedAgent.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500',
+                      )}
+                    >
+                      {selectedAgent.is_active ? '● 运行中' : '○ 已暂停'}
+                    </span>
+                    <Button size="sm" onClick={() => handleRun(selectedAgent.id)} disabled={running === selectedAgent.id} className="gap-1.5">
+                      {running === selectedAgent.id ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          运行中...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-3.5 w-3.5" />
+                          立即运行
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
 
-        <div className="space-y-2 overflow-y-auto flex-1 pr-1">
-          {agents.length === 0 && !showCreate ? (
-            <div className="text-center py-16 text-slate-400">
-              <Bot className="w-10 h-10 mx-auto mb-3 opacity-30" />
-              <p className="text-sm font-medium">暂无智能体</p>
-              <p className="text-xs mt-1">创建智能体开始追踪标的</p>
-              <Button size="sm" className="mt-4 gap-1" onClick={() => setShowCreate(true)}>
-                <Plus className="w-3 h-3" /> 创建智能体
-              </Button>
-            </div>
+                {selectedAgent.analysis_focus ? (
+                  <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                    <Target className="h-3.5 w-3.5 text-blue-500" />
+                    <span className="font-medium text-slate-600">研究重点：</span>
+                    {selectedAgent.analysis_focus}
+                  </div>
+                ) : null}
+
+                <div className="mt-3 flex items-center gap-4 text-[11px] text-slate-400">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    最近运行：{selectedAgent.last_run_at ? timeAgo(selectedAgent.last_run_at) : '从未执行'}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <RefreshCw className="h-3 w-3" />
+                    {isPriceTrackingAgent ? '调度频率：碳酸锂价格波动 5% 以上触发' : `调度频率：每 ${selectedAgent.schedule_minutes} 分钟`}
+                  </span>
+                </div>
+              </div>
+
+              {running === selectedAgent.id ? (
+                <div className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <div>
+                    <span className="font-medium">标的跟踪正在运行...</span>
+                    <span className="ml-2 text-blue-500">正在同步最新数据</span>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="w-fit rounded-lg bg-slate-100 p-1">
+                <button
+                  onClick={() => setDetailTab('analyses')}
+                  className={cn(
+                    'rounded-md px-4 py-1.5 text-sm font-medium transition-colors',
+                    detailTab === 'analyses' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700',
+                  )}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <FileText className="h-3.5 w-3.5" />
+                    分析报告 ({analyses.length})
+                  </span>
+                </button>
+                {!isPriceTrackingAgent ? (
+                  <button
+                    onClick={() => setDetailTab('events')}
+                    className={cn(
+                      'rounded-md px-4 py-1.5 text-sm font-medium transition-colors',
+                      detailTab === 'events' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700',
+                    )}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Zap className="h-3.5 w-3.5" />
+                      事件列表 ({events.length})
+                    </span>
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+                {detailTab === 'analyses' ? (
+                  analyses.length === 0 ? (
+                    <div className="py-16 text-center text-slate-400">
+                      <Sparkles className="mx-auto mb-3 h-10 w-10 opacity-30" />
+                      <p className="text-sm font-medium">暂时还没有分析报告</p>
+                      <p className="mt-1 text-xs">运行标的跟踪后会生成最新分析报告</p>
+                    </div>
+                  ) : (
+                    analyses.map((analysis) => <AnalysisReport key={analysis.id} analysis={analysis} />)
+                  )
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <EventTimeline events={events} />
+                  </div>
+                )}
+              </div>
+            </>
           ) : (
-            agents.map(agent => (
-              <AgentCard
-                key={agent.id}
-                agent={agent}
-                selected={selectedId === agent.id}
-                onSelect={() => setSelectedId(agent.id)}
-                onToggle={() => handleToggle(agent)}
-                onRun={() => handleRun(agent.id)}
-                onDelete={() => handleDelete(agent.id)}
-                running={running === agent.id}
-              />
-            ))
+            <div className="flex h-full items-center justify-center text-slate-400">
+              <div className="text-center">
+                <Bot className="mx-auto mb-3 h-12 w-12 opacity-20" />
+                <p className="font-medium">请选择一个标的跟踪查看详情</p>
+                <p className="mt-1 text-sm">或者先新建一个标的跟踪</p>
+              </div>
+            </div>
           )}
         </div>
       </div>
-
-      {/* ── Right: Agent Detail ─────────────────────────────────────────────── */}
-      <div className="flex-1 min-w-0 flex flex-col gap-4">
-        {selectedAgent ? (
-          <>
-            {/* Agent Header */}
-            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center',
-                    selectedAgent.is_active ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400')}>
-                    <Bot className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="font-bold text-lg text-slate-900">{selectedAgent.name}</h2>
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                      <Building2 className="w-3 h-3" />
-                      {selectedAgent.target_company} · {selectedAgent.target_industry}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={cn('text-xs px-2 py-1 rounded-full font-medium',
-                    selectedAgent.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500')}>
-                    {selectedAgent.is_active ? '● 运行中' : '○ 已暂停'}
-                  </span>
-                  <Button size="sm" onClick={() => handleRun(selectedAgent.id)}
-                    disabled={running === selectedAgent.id} className="gap-1.5">
-                    {running === selectedAgent.id
-                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 执行中...</>
-                      : <><Play className="w-3.5 h-3.5" /> 立即执行</>}
-                  </Button>
-                </div>
-              </div>
-              {selectedAgent.analysis_focus && (
-                <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 px-3 py-2 rounded-lg">
-                  <Target className="w-3.5 h-3.5 text-blue-500" />
-                  <span className="font-medium text-slate-600">研究重点：</span> {selectedAgent.analysis_focus}
-                </div>
-              )}
-              <div className="flex items-center gap-4 mt-3 text-[11px] text-slate-400">
-                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> 上次执行：{selectedAgent.last_run_at ? timeAgo(selectedAgent.last_run_at) : '从未'}</span>
-                <span className="flex items-center gap-1"><RefreshCw className="w-3 h-3" /> 执行周期：每 {selectedAgent.schedule_minutes} 分钟</span>
-                <span className="flex items-center gap-1"><Activity className="w-3 h-3" /> {events.length} 事件 · {analyses.length} 分析</span>
-              </div>
-            </div>
-
-            {/* Running Banner */}
-            {running === selectedAgent.id && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3 text-sm text-blue-700">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <div>
-                  <span className="font-medium">智能体执行中...</span>
-                  <span className="text-blue-500 ml-2">发现事件 → 基于本体分析 → 生成报告</span>
-                </div>
-              </div>
-            )}
-
-            {/* Tabs */}
-            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-              <button
-                onClick={() => setDetailTab('analyses')}
-                className={cn('px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
-                  detailTab === 'analyses' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>
-                <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> 分析报告 ({analyses.length})</span>
-              </button>
-              <button
-                onClick={() => setDetailTab('events')}
-                className={cn('px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
-                  detailTab === 'events' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>
-                <span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5" /> 事件列表 ({events.length})</span>
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto pr-1 space-y-4">
-              {detailTab === 'analyses' ? (
-                analyses.length === 0 ? (
-                  <div className="text-center py-16 text-slate-400">
-                    <Sparkles className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                    <p className="text-sm font-medium">暂无分析报告</p>
-                    <p className="text-xs mt-1">执行智能体以生成AI研究报告</p>
-                  </div>
-                ) : (
-                  analyses.map(a => <AnalysisReport key={a.id} analysis={a} />)
-                )
-              ) : (
-                <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-                  <EventTimeline events={events} />
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="flex items-center justify-center h-full text-slate-400">
-            <div className="text-center">
-              <Bot className="w-12 h-12 mx-auto mb-3 opacity-20" />
-              <p className="font-medium">选择智能体查看详情</p>
-              <p className="text-sm mt-1">或创建新的研究智能体</p>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>{/* end agents panel */}
     </div>
   );
 }

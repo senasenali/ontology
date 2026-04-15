@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '@/src/api/client';
+import type { ObjectType, Property } from '@/src/store/ontologyStore';
 import { Button } from '@/src/components/ui/button';
 import { Input } from '@/src/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/card';
@@ -30,6 +31,26 @@ interface ActionRuleParam {
   paramValue: string;
 }
 
+interface ExecuteField {
+  key: string;
+  label: string;
+  required?: boolean;
+  placeholder?: string;
+  paramType?: string;
+  defaultValue?: string;
+}
+
+interface OntologyRuleParam {
+  id: string;
+  ruleId: string;
+  paramDirection: string;
+  paramName: string;
+  paramType: string;
+  isRequired: number;
+  description: string;
+  sortOrder: number;
+}
+
 interface ActionEffect {
   id?: string;
   effectType: 'NOTIFICATION' | 'LINGKE' | 'EMAIL';
@@ -51,6 +72,9 @@ interface OntologyRule {
   ruleCategory: string;
   functionName: string;
   functionDescription?: string;
+  interfaceUrl?: string;
+  inputParams?: OntologyRuleParam[];
+  outputParams?: OntologyRuleParam[];
 }
 
 interface FunctionType {
@@ -74,9 +98,10 @@ const EFFECT_TYPES = [
   { value: 'EMAIL', label: '邮件推送', enabled: false },
 ];
 
-export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: any) => void }) {
+export function ActionTypes() {
   const [actionTypes, setActionTypes] = useState<ActionType[]>([]);
   const [ontologyRules, setOntologyRules] = useState<OntologyRule[]>([]);
+  const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
   const [functionTypes, setFunctionTypes] = useState<FunctionType[]>([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -97,6 +122,7 @@ export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: an
   const [executeDialogOpen, setExecuteDialogOpen] = useState(false);
   const [executingAction, setExecutingAction] = useState<ActionType | null>(null);
   const [executeParams, setExecuteParams] = useState<Record<string, string>>({});
+  const [executeFields, setExecuteFields] = useState<ExecuteField[]>([]);
   const [executeLoading, setExecuteLoading] = useState(false);
 
   useEffect(() => {
@@ -106,14 +132,16 @@ export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: an
   const loadData = async () => {
     setLoading(true);
     try {
-      const [atRes, orRes, ftRes] = await Promise.all([
+      const [atRes, orRes, ftRes, ontologyRes] = await Promise.all([
         api.getActionTypes(),
         api.getOntologyRules(),
         api.getFunctionTypes(),
+        api.getOntology(),
       ]);
       setActionTypes(atRes.actionTypes || []);
       setOntologyRules(orRes.rules || []);
       setFunctionTypes(ftRes.functions || []);
+      setObjectTypes(ontologyRes.objectTypes || []);
     } catch (err: any) {
       toast.error(`加载失败: ${err.message}`);
     } finally {
@@ -151,14 +179,8 @@ export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: an
     }
 
     try {
-      const saveData: {
-        displayName: string;
-        description?: string;
-        rules: ActionRule[];
-        effects: ActionEffect[];
-      } = {
-        displayName: formData.displayName,
-        description: formData.description,
+      const saveData = {
+        ...formData,
         rules,
         effects: effects.filter(e => e.effectType === 'NOTIFICATION'), // 只保存通知类型
       };
@@ -167,7 +189,12 @@ export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: an
         await api.updateActionType(editingAction.id, saveData);
         toast.success('动作类型更新成功');
       } else {
-        await api.createActionType(saveData);
+        await api.createActionType(saveData as {
+          displayName: string;
+          description?: string;
+          rules?: any[];
+          effects?: any[];
+        });
         toast.success('动作类型创建成功');
       }
       setDialogOpen(false);
@@ -191,21 +218,48 @@ export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: an
 
   const handleOpenExecute = (action: ActionType) => {
     setExecutingAction(action);
-    // 从规则的params中提取需要填写的参数
-    const params: Record<string, string> = {};
+    const fields: ExecuteField[] = [];
+    const fieldMap = new Map<string, ExecuteField>();
     action.rules?.forEach(rule => {
-      rule.params?.forEach(param => {
-        if (param.paramName) {
-          params[param.paramName] = param.paramValue || '';
+      const derivedParams = (rule.params && rule.params.length > 0)
+        ? rule.params
+        : rule.ruleType === 'ONTOLOGY'
+          ? buildOntologyRuleParams(rule.ontologyRuleId)
+          : buildFunctionRuleParams(rule.functionTypeId);
+      derivedParams.forEach(param => {
+        if (!param.paramName) return;
+        const meta = getParamMeta(rule, param.paramName);
+        const nextField: ExecuteField = {
+          key: param.paramName,
+          label: meta?.description || param.paramName,
+          required: meta?.isRequired === 1,
+          placeholder: `请输入${meta?.description || param.paramName}`,
+          paramType: meta?.paramType,
+          defaultValue: param.paramValue || '',
+        };
+        if (!fieldMap.has(param.paramName)) {
+          fieldMap.set(param.paramName, nextField);
+          fields.push(nextField);
         }
       });
     });
+
+    const params: Record<string, string> = {};
+    fields.forEach(field => {
+      params[field.key] = field.defaultValue || '';
+    });
+    setExecuteFields(fields);
     setExecuteParams(params);
     setExecuteDialogOpen(true);
   };
 
   const handleExecute = async () => {
     if (!executingAction) return;
+    const missingField = executeFields.find(field => field.required && !String(executeParams[field.key] || '').trim());
+    if (missingField) {
+      toast.error(`请填写${missingField.label}`);
+      return;
+    }
     
     setExecuteLoading(true);
     try {
@@ -223,6 +277,7 @@ export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: an
       setExecuteDialogOpen(false);
       setExecutingAction(null);
       setExecuteParams({});
+      setExecuteFields([]);
     } catch (err: any) {
       toast.error(`执行失败: ${err.message}`);
     } finally {
@@ -234,36 +289,112 @@ export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: an
     setRules([...rules, { ruleType: 'ONTOLOGY', params: [] }]);
   };
 
+  const getOntologyRuleById = (id?: string) => {
+    if (!id) return undefined;
+    return ontologyRules.find((rule) => rule.id === id);
+  };
+
+  const getObjectTypeIdFromInterfaceUrl = (interfaceUrl?: string) => {
+    if (!interfaceUrl) return undefined;
+    const match = interfaceUrl.match(/\/api\/instances\/([^/{}]+)/);
+    return match?.[1];
+  };
+
+  const buildFallbackInputParams = (ruleId: string | undefined) => {
+    const selectedRule = getOntologyRuleById(ruleId);
+    const objectTypeId = getObjectTypeIdFromInterfaceUrl(selectedRule?.interfaceUrl);
+    if (!objectTypeId) return [];
+
+    const objectType = objectTypes.find((item) => item.id === objectTypeId);
+    if (!objectType?.properties?.length) return [];
+
+    return objectType.properties
+      .filter((prop) => prop.id)
+      .map((prop: Property, index) => ({
+        id: `${selectedRule?.id || objectTypeId}_fallback_${index}`,
+        ruleId: selectedRule?.id || '',
+        paramDirection: 'INPUT',
+        paramName: prop.id,
+        paramType: prop.type || 'string',
+        isRequired: prop.isPrimaryKey ? 1 : 0,
+        description: prop.name || prop.baseColumn || prop.id,
+        sortOrder: index,
+      }));
+  };
+
+  const buildOntologyRuleParams = (ruleId: string | undefined, existingParams?: ActionRuleParam[]) => {
+    const selectedRule = getOntologyRuleById(ruleId);
+    const templateParams = selectedRule?.inputParams?.length
+      ? selectedRule.inputParams
+      : buildFallbackInputParams(ruleId);
+
+    if (!templateParams.length) {
+      return existingParams || [];
+    }
+
+    const existingValueMap = new Map(
+      (existingParams || []).map((param) => [param.paramName, param.paramValue || ''])
+    );
+
+    return templateParams.map((param) => ({
+      paramName: param.paramName,
+      paramValue: existingValueMap.get(param.paramName) || '',
+    }));
+  };
+
+  const buildFunctionRuleParams = (functionTypeId: string | undefined, existingParams?: ActionRuleParam[]) => {
+    const selectedFunction = functionTypes.find((item) => item.id === functionTypeId);
+    const templateParams = selectedFunction?.inputParams || [];
+
+    if (!templateParams.length) {
+      return existingParams || [];
+    }
+
+    const existingValueMap = new Map(
+      (existingParams || []).map((param) => [param.paramName, param.paramValue || ''])
+    );
+
+    return templateParams.map((param) => ({
+      paramName: param.paramCode || param.paramName,
+      paramValue: existingValueMap.get(param.paramCode || param.paramName) || param.defaultValue || '',
+    }));
+  };
+
   const updateRule = (index: number, field: keyof ActionRule, value: any) => {
     const newRules = [...rules];
+
+    if (field === 'ruleType') {
+      newRules[index] = {
+        ruleType: value,
+        params: [],
+        ontologyRuleCategory: undefined,
+        ontologyRuleId: undefined,
+        functionTypeId: undefined,
+      };
+      setRules(newRules);
+      return;
+    }
+
     newRules[index] = { ...newRules[index], [field]: value };
+
+    if (field === 'ontologyRuleCategory') {
+      newRules[index].ontologyRuleId = undefined;
+      newRules[index].params = [];
+    }
+
+    if (field === 'ontologyRuleId') {
+      newRules[index].params = buildOntologyRuleParams(value, newRules[index].params);
+    }
+
+    if (field === 'functionTypeId') {
+      newRules[index].params = buildFunctionRuleParams(value, newRules[index].params);
+    }
+
     setRules(newRules);
   };
 
   const removeRule = (index: number) => {
     setRules(rules.filter((_, i) => i !== index));
-  };
-
-  const addRuleParam = (ruleIndex: number) => {
-    const newRules = [...rules];
-    newRules[ruleIndex].params = [...(newRules[ruleIndex].params || []), { paramName: '', paramValue: '' }];
-    setRules(newRules);
-  };
-
-  const updateRuleParam = (ruleIndex: number, paramIndex: number, field: keyof ActionRuleParam, value: string) => {
-    const newRules = [...rules];
-    if (newRules[ruleIndex].params) {
-      newRules[ruleIndex].params![paramIndex] = { ...newRules[ruleIndex].params![paramIndex], [field]: value };
-      setRules(newRules);
-    }
-  };
-
-  const removeRuleParam = (ruleIndex: number, paramIndex: number) => {
-    const newRules = [...rules];
-    if (newRules[ruleIndex].params) {
-      newRules[ruleIndex].params = newRules[ruleIndex].params!.filter((_, i) => i !== paramIndex);
-      setRules(newRules);
-    }
   };
 
   const updateEffect = (index: number, field: keyof ActionEffect, value: any) => {
@@ -274,6 +405,18 @@ export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: an
 
   const getOntologyRulesByCategory = (category: string) => {
     return ontologyRules.filter(r => r.ruleCategory === category);
+  };
+
+  const getParamMeta = (rule: ActionRule, paramName: string) => {
+    if (rule.ruleType === 'ONTOLOGY') {
+      const selectedRule = getOntologyRuleById(rule.ontologyRuleId);
+      const templateParams = selectedRule?.inputParams?.length
+        ? selectedRule.inputParams
+        : buildFallbackInputParams(rule.ontologyRuleId);
+      return templateParams.find((param) => param.paramName === paramName);
+    }
+    const selectedFunction = getFunctionTypeById(rule.functionTypeId || '');
+    return selectedFunction?.inputParams?.find((param) => (param.paramCode || param.paramName) === paramName);
   };
 
   const getFunctionTypeById = (id: string) => {
@@ -501,33 +644,6 @@ export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: an
                       )}
                     </div>
 
-                    {/* Rule Params */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label>入参配置</Label>
-                        <Button type="button" variant="outline" size="sm" onClick={() => addRuleParam(ruleIndex)}>
-                          <Plus className="w-4 h-4 mr-1" />
-                          添加参数
-                        </Button>
-                      </div>
-                      {rule.params?.map((param, paramIndex) => (
-                        <div key={paramIndex} className="grid grid-cols-3 gap-2">
-                          <Input
-                            placeholder="参数名"
-                            value={param.paramName}
-                            onChange={(e) => updateRuleParam(ruleIndex, paramIndex, 'paramName', e.target.value)}
-                          />
-                          <Input
-                            placeholder="参数值"
-                            value={param.paramValue}
-                            onChange={(e) => updateRuleParam(ruleIndex, paramIndex, 'paramValue', e.target.value)}
-                          />
-                          <Button type="button" variant="ghost" size="sm" className="text-red-500" onClick={() => removeRuleParam(ruleIndex, paramIndex)}>
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
                   </div>
                 </Card>
               ))}
@@ -583,39 +699,62 @@ export function ActionTypes({ data, onUpdate }: { data: any; onUpdate: (data: an
       </Dialog>
 
       {/* Execute Dialog */}
-      <Dialog open={executeDialogOpen} onOpenChange={setExecuteDialogOpen}>
+      <Dialog
+        open={executeDialogOpen}
+        onOpenChange={(open) => {
+          setExecuteDialogOpen(open);
+          if (!open) {
+            setExecutingAction(null);
+            setExecuteParams({});
+            setExecuteFields([]);
+          }
+        }}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>执行动作: {executingAction?.displayName}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {Object.keys(executeParams).length === 0 ? (
+            <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+              执行参数会根据绑定的本体规则或函数类型自动生成，这里填写本次执行值即可。
+            </div>
+            {executeFields.length === 0 ? (
               <p className="text-slate-500">此动作类型无需输入参数</p>
             ) : (
-              Object.entries(executeParams).map(([key, value]) => (
-                <div key={key} className="space-y-2">
-                  <Label>{key}</Label>
+              executeFields.map((field) => (
+                <div key={field.key} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Label>{field.label}</Label>
+                    {field.required && (
+                      <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">
+                        必填
+                      </Badge>
+                    )}
+                    {field.paramType && (
+                      <span className="text-xs text-slate-400">类型：{field.paramType}</span>
+                    )}
+                  </div>
                   <Input
-                    value={value}
-                    onChange={(e) => setExecuteParams({ ...executeParams, [key]: e.target.value })}
-                    placeholder={`请输入 ${key}`}
+                    value={executeParams[field.key] || ''}
+                    onChange={(e) => setExecuteParams({ ...executeParams, [field.key]: e.target.value })}
+                    placeholder={field.placeholder || `请输入 ${field.label}`}
                   />
                 </div>
               ))
             )}
             
-            {/* 默认添加instanceId参数 */}
-            {!executeParams['instanceId'] && (
-              <div className="space-y-2">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
                 <Label>实例ID (instanceId)</Label>
-                <Input
-                  value={executeParams['instanceId'] || ''}
-                  onChange={(e) => setExecuteParams({ ...executeParams, instanceId: e.target.value })}
-                  placeholder="请输入实例ID"
-                />
+                <span className="text-xs text-slate-400">选填</span>
               </div>
-            )}
+              <Input
+                value={executeParams['instanceId'] || ''}
+                onChange={(e) => setExecuteParams({ ...executeParams, instanceId: e.target.value })}
+                placeholder="如需关联当前实例，可填写实例ID"
+              />
+            </div>
           </div>
 
           <DialogFooter>
