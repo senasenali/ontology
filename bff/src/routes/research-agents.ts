@@ -4,6 +4,8 @@ import fetch from 'node-fetch';
 
 const router = Router();
 const MODEL = 'deepseek-chat';
+const LITHIUM_DEMO_AGENT_ID = 'demo_agent_lithium';
+const LITHIUM_INSTANCE_ID = 'LC-BT-001-2024';
 
 // Java backend URL
 const JAVA_BACKEND = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
@@ -16,11 +18,343 @@ function checkAI(): boolean {
   return !!DEEPSEEK_API_KEY;
 }
 
+function isLithiumTrackingAgent(agent: any, id: string) {
+  const target = String(agent?.targetCompany || '').trim();
+  return id === LITHIUM_DEMO_AGENT_ID || target === '碳酸锂';
+}
+
+function buildFallbackLithiumAgent(id: string) {
+  return {
+    id,
+    name: '碳酸锂标的跟踪',
+    targetCompany: '碳酸锂',
+    targetIndustry: '锂电材料',
+    analysisFocus: '价格波动、成本传导、电池链盈利压力',
+    scheduleMinutes: 120,
+  };
+}
+
+async function fetchJson(url: string, init?: any) {
+  const response = await fetch(url, init);
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data?.error || data?.message || `Request failed: ${response.status}`);
+  }
+  return data;
+}
+
+async function saveAgentEvent(agentId: string, event: any) {
+  await fetchJson(`${JAVA_BACKEND}/api/research-agents/${agentId}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(event),
+  });
+}
+
+async function saveAgentAnalysis(agentId: string, analysis: any) {
+  await fetchJson(`${JAVA_BACKEND}/api/research-agents/${agentId}/analyses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(analysis),
+  });
+}
+
+function buildLithiumFallbackAnalysis(
+  transmissionData: any,
+  eventTitle: string,
+  previousPrice: number,
+  latestPrice: number,
+  changePercent: number,
+) {
+  const firstLayer = transmissionData.nodes.filter((item: any) => item.level === 1);
+  const secondLayer = transmissionData.nodes.filter((item: any) => item.level >= 2);
+  const uniqueTypeNames = (items: any[]) =>
+    Array.from(new Set(items.map((item: any) => item.name))).join('、');
+
+  return {
+    title: `${eventTitle}带来的成本传导重估`,
+    content: `碳酸锂最新价格由 ${previousPrice.toFixed(2)} 变为 ${latestPrice.toFixed(2)}，单次波动 ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%。本轮价格冲击首先传导至${uniqueTypeNames(firstLayer) || '一阶材料环节'}，随后继续扩散到${uniqueTypeNames(secondLayer) || '二阶制造环节'}。当前更需要观察的是中游提价速度与终端利润消化能力是否匹配本轮成本变化。`,
+    key_findings: [
+      `碳酸锂价格单次波动达到 ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%，已超过 5% 触发阈值。`,
+      `一阶受影响环节集中在${uniqueTypeNames(firstLayer) || '材料环节'}，对象类型层传导已清晰覆盖关键中游节点。`,
+      `二阶传导已覆盖${uniqueTypeNames(secondLayer) || '制造环节'}，说明成本冲击正在进一步向下游扩散。`,
+    ],
+    recommendation: '继续跟踪电解液、电芯与动力电池的跟涨幅度，判断成本压力会更多由中游吸收还是继续向终端传导。',
+  };
+}
+
+async function buildLithiumStructuredAnalysis(
+  agent: any,
+  transmissionData: any,
+  previousPrice: number,
+  latestPrice: number,
+  changePercent: number,
+  contextLabel: string,
+  eventTitle: string,
+) {
+  const analysisPrompt = `${RESEARCH_SYSTEM_PROMPT}
+
+你正在跟踪: ${agent.targetCompany}（行业: ${agent.targetIndustry}）
+${agent.analysisFocus ? `重点关注: ${agent.analysisFocus}` : ''}
+
+现在系统已经收到一条碳酸锂价格变化输入，并完成了结构化的价格传导计算。请基于以下事实，输出一份适合研究员阅读的结构化分析结果。
+
+## 价格监控
+- 来源: ${contextLabel}
+- 上一期价格: ${previousPrice.toFixed(2)}
+- 最新价格: ${latestPrice.toFixed(2)}
+- 波动幅度: ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%
+
+## 价格传导结果
+${JSON.stringify(transmissionData, null, 2)}
+
+要求：
+1. 核心结论控制在 3 条
+2. 明确指出一阶和二阶受影响环节
+3. recommendation 用一句话
+4. 只返回 JSON，不要返回 Markdown 代码块
+
+返回 JSON：
+{
+  "title": "分析标题",
+  "content": "一段 200-300 字的分析摘要",
+  "key_findings": ["结论1", "结论2", "结论3"],
+  "recommendation": "一句话建议"
+}`;
+
+  let analysis: any = null;
+  let analysisSource: 'deepseek' | 'fallback' = 'fallback';
+  try {
+    const analysisText = await callDeepSeek([{ role: 'user', content: analysisPrompt }]);
+    try {
+      analysis = JSON.parse(analysisText);
+      analysisSource = 'deepseek';
+    } catch {
+      const match = analysisText.match(/```json\s*([\s\S]*?)```/);
+      if (match) {
+        analysis = JSON.parse(match[1]);
+        analysisSource = 'deepseek';
+      }
+    }
+  } catch (error) {
+    console.warn('[Lithium Analysis] DeepSeek unavailable, using fallback analysis:', error);
+  }
+
+  if (!analysis) {
+    analysis = buildLithiumFallbackAnalysis(transmissionData, eventTitle, previousPrice, latestPrice, changePercent);
+  }
+
+  return { analysis, analysisSource };
+}
+
+async function runLithiumPriceTracking(agentId: string, agent: any) {
+  const compareResult = await fetchJson(
+    `${JAVA_BACKEND}/api/lithium-price-monitor/compare?instanceId=${encodeURIComponent(LITHIUM_INSTANCE_ID)}&thresholdPercent=5`,
+  );
+
+  if (!compareResult.success) {
+    throw new Error(compareResult.message || '无法读取碳酸锂价格监控数据');
+  }
+
+  const compareData = compareResult.data;
+  if (!compareData.thresholdExceeded) {
+    return {
+      success: true,
+      skipped: true,
+      compare: compareData,
+      message: '碳酸锂价格波动未达到触发阈值',
+    };
+  }
+
+  const latestPrice = Number(compareData.latest.price);
+  const previousPrice = Number(compareData.previous.price);
+  const changePercent = Number(compareData.priceChangePercent);
+
+  const transmissionResult = await fetchJson(`${JAVA_BACKEND}/api/analysis/price-transmission/object-type`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      objectTypeId: 'lithium_carbonate',
+      priceChangePercent: changePercent,
+      previousPrice,
+      latestPrice,
+      depth: 4,
+    }),
+  });
+
+  if (!transmissionResult.success) {
+    throw new Error(transmissionResult.error || '价格传导计算失败');
+  }
+
+  const transmissionData = transmissionResult.data;
+  const eventDate = String(compareData.latest.priceDate || compareData.latest.createdAt || '').slice(0, 10);
+  const eventTitle = `碳酸锂价格${changePercent >= 0 ? '上涨' : '下跌'} ${Math.abs(changePercent).toFixed(2)}%`;
+  const eventSummary = `监测到碳酸锂最新价格由 ${previousPrice.toFixed(2)} 变为 ${latestPrice.toFixed(2)}，单次波动 ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%，已触发价格传导分析。`;
+
+  const eventPayload = {
+    id: `evt_${crypto.randomUUID().slice(0, 8)}`,
+    title: eventTitle,
+    summary: eventSummary,
+    source: compareData.latest.source || '价格监控',
+    source_url: '',
+    event_date: eventDate,
+    impact_level: Math.abs(changePercent) >= 10 ? 'high' : 'medium',
+    related_entities: JSON.stringify(['碳酸锂', '电池电解液', '正极材料', '电芯', '电池', '新能源汽车']),
+  };
+
+  await saveAgentEvent(agentId, eventPayload);
+
+  const { analysis, analysisSource } = await buildLithiumStructuredAnalysis(
+    agent,
+    transmissionData,
+    previousPrice,
+    latestPrice,
+    changePercent,
+    `监控实例 ${LITHIUM_INSTANCE_ID}`,
+    eventTitle,
+  );
+
+  const analysisPayload = {
+    id: `ana_${crypto.randomUUID().slice(0, 8)}`,
+    event_id: eventPayload.id,
+    title: analysis.title || `${eventTitle}带来的成本传导重估`,
+    content: analysis.content || eventSummary,
+    key_findings: JSON.stringify(analysis.key_findings || []),
+    impact_chain: JSON.stringify({
+      type: 'price_transmission_object_type',
+      analysis_source: analysisSource,
+      data: transmissionData,
+    }),
+    recommendation: analysis.recommendation || '继续观察价格波动是否继续向中下游传导。',
+  };
+
+  await saveAgentAnalysis(agentId, analysisPayload);
+
+  return {
+    success: true,
+    skipped: false,
+    event: eventPayload,
+    analysis: {
+      ...analysis,
+      impact_chain: {
+        type: 'price_transmission_object_type',
+        analysis_source: analysisSource,
+        data: transmissionData,
+      },
+    },
+    transmissionData,
+    compare: compareData,
+  };
+}
+
+router.post('/:id/manual-price-analysis', async (req, res) => {
+  if (!checkAI()) {
+    return res.status(503).json({ error: 'DEEPSEEK_API_KEY not configured' });
+  }
+
+  try {
+    let agent: any = null;
+    const agentResponse = await fetch(`${JAVA_BACKEND}/api/research-agents/${req.params.id}`);
+    if (agentResponse.ok) {
+      const agentData = await agentResponse.json();
+      agent = agentData.agent;
+    } else if (req.params.id === LITHIUM_DEMO_AGENT_ID) {
+      agent = buildFallbackLithiumAgent(req.params.id);
+    } else {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    if (!isLithiumTrackingAgent(agent, req.params.id)) {
+      return res.status(400).json({ error: 'Only lithium tracking supports manual price analysis' });
+    }
+
+    const latestPrice = Number(req.body?.latestPrice);
+    const previousPrice = Number(req.body?.previousPrice ?? 12.5);
+    const depth = Number(req.body?.depth ?? 4);
+
+    if (!Number.isFinite(latestPrice) || latestPrice <= 0) {
+      return res.status(400).json({ error: 'latestPrice must be a positive number' });
+    }
+    if (!Number.isFinite(previousPrice) || previousPrice <= 0) {
+      return res.status(400).json({ error: 'previousPrice must be a positive number' });
+    }
+    if (!Number.isFinite(depth) || depth < 1 || depth > 5) {
+      return res.status(400).json({ error: 'depth must be between 1 and 5' });
+    }
+
+    const changePercent = ((latestPrice - previousPrice) / previousPrice) * 100;
+    const transmissionResult = await fetchJson(`${JAVA_BACKEND}/api/analysis/price-transmission/object-type`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        objectTypeId: 'lithium_carbonate',
+        priceChangePercent: changePercent,
+        previousPrice,
+        latestPrice,
+        depth,
+      }),
+    });
+
+    if (!transmissionResult.success) {
+      throw new Error(transmissionResult.error || '价格传导计算失败');
+    }
+
+    const transmissionData = transmissionResult.data;
+    const eventTitle = `碳酸锂价格${changePercent >= 0 ? '上涨' : '下跌'} ${Math.abs(changePercent).toFixed(2)}%`;
+    const { analysis, analysisSource } = await buildLithiumStructuredAnalysis(
+      agent,
+      transmissionData,
+      previousPrice,
+      latestPrice,
+      changePercent,
+      '手动录入最新价格',
+      eventTitle,
+    );
+
+    const analysisPayload = {
+      id: `ana_${crypto.randomUUID().slice(0, 8)}`,
+      event_id: null,
+      title: analysis.title || `${eventTitle}带来的成本传导重估`,
+      content: analysis.content || `碳酸锂价格由 ${previousPrice.toFixed(2)} 变为 ${latestPrice.toFixed(2)}，已生成最新传导分析。`,
+      key_findings: JSON.stringify(analysis.key_findings || []),
+      impact_chain: JSON.stringify({
+        type: 'price_transmission_object_type',
+        analysis_source: analysisSource,
+        data: transmissionData,
+      }),
+      recommendation: analysis.recommendation || '继续观察价格波动是否继续向中下游传导。',
+    };
+
+    await saveAgentAnalysis(req.params.id, analysisPayload);
+
+    res.json({
+      success: true,
+      analysis: {
+        ...analysis,
+        id: analysisPayload.id,
+        agent_id: req.params.id,
+        event_id: null,
+        created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+        impact_chain: {
+          type: 'price_transmission_object_type',
+          analysis_source: analysisSource,
+          data: transmissionData,
+        },
+        transmissionData,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // DeepSeek API call helper
 async function callDeepSeek(messages: { role: string; content: string }[]): Promise<string> {
   if (!DEEPSEEK_API_KEY) throw new Error('DEEPSEEK_API_KEY not configured');
 
   const startTime = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
   console.log(`[DeepSeek] Request started at ${new Date().toISOString()}`);
   console.log(`[DeepSeek] Messages:`, JSON.stringify(messages, null, 2));
 
@@ -37,6 +371,7 @@ async function callDeepSeek(messages: { role: string; content: string }[]): Prom
         temperature: 0.7,
         max_tokens: 4096,
       }),
+      signal: controller.signal,
     });
 
     const duration = Date.now() - startTime;
@@ -52,12 +387,14 @@ async function callDeepSeek(messages: { role: string; content: string }[]): Prom
     const content = data.choices?.[0]?.message?.content || '';
     console.log(`[DeepSeek] Response content length: ${content.length} chars`);
     console.log(`[DeepSeek] Token usage:`, data.usage);
-    
+
     return content;
   } catch (error) {
     const duration = Date.now() - startTime;
     console.error(`[DeepSeek] Request failed after ${duration}ms:`, error);
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -158,13 +495,21 @@ router.post('/:id/run', async (req, res) => {
   }
 
   try {
-    // Get agent info from Java backend
+    let agent: any = null;
     const agentResponse = await fetch(`${JAVA_BACKEND}/api/research-agents/${req.params.id}`);
-    if (!agentResponse.ok) {
+    if (agentResponse.ok) {
+      const agentData = await agentResponse.json();
+      agent = agentData.agent;
+    } else if (req.params.id === LITHIUM_DEMO_AGENT_ID) {
+      agent = buildFallbackLithiumAgent(req.params.id);
+    } else {
       return res.status(404).json({ error: 'Agent not found' });
     }
-    const agentData = await agentResponse.json();
-    const agent = agentData.agent;
+
+    if (isLithiumTrackingAgent(agent, req.params.id)) {
+      const result = await runLithiumPriceTracking(req.params.id, agent);
+      return res.json(result);
+    }
 
     // Get ontology from Java backend
     const ontologyResponse = await fetch(`${JAVA_BACKEND}/api/ontology`);

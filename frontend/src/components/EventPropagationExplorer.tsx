@@ -107,6 +107,15 @@ type DemoScenario =
   | { kind: 'layered-chain'; title: string; scene: SankeyScene }
   | { kind: 'relation-discovery'; title: string; scene: SankeyScene };
 
+type RelationCandidate = {
+  id: string;
+  status: string;
+  sourceName: string;
+  targetName: string;
+  linkTypeName: string;
+  evidence?: string;
+};
+
 const NODE_WIDTH = 120;
 const NODE_HEIGHT = 48;
 
@@ -663,18 +672,35 @@ function buildScenario(eventTitle: string): DemoScenario | null {
   return null;
 }
 
-function SankeySceneView({ scene }: { scene: SankeyScene }) {
+function SankeySceneView({
+  scene,
+  relationCandidate,
+  creatingLink,
+  onCreateLink,
+}: {
+  scene: SankeyScene;
+  relationCandidate?: RelationCandidate | null;
+  creatingLink?: boolean;
+  onCreateLink?: () => Promise<void> | void;
+}) {
   const nodeMap = useMemo(() => new Map(scene.nodes.map((node) => [node.id, node])), [scene.nodes]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(scene.nodes[0]?.id || null);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [relationDialogOpen, setRelationDialogOpen] = useState(false);
-  const [relationWritebackLabel, setRelationWritebackLabel] = useState('待写入');
   const viewportRef = useRef<HTMLDivElement | null>(null);
+
+  const relationWritebackLabel =
+    relationCandidate?.status === 'created'
+      ? '已创建'
+      : relationCandidate?.status === 'recognized'
+        ? '识别到新关系'
+        : '待识别';
+  const relationActionVerb = relationCandidate?.status === 'created' ? '删除链接' : '创建链接';
+  const relationActionPastVerb = relationCandidate?.status === 'created' ? '删除' : '创建';
 
   useEffect(() => {
     setSelectedNodeId(scene.nodes[0]?.id || null);
     setRelationDialogOpen(false);
-    setRelationWritebackLabel('待写入');
   }, [scene]);
 
   useEffect(() => {
@@ -702,7 +728,7 @@ function SankeySceneView({ scene }: { scene: SankeyScene }) {
   const containerWidth = Math.max(320, viewportWidth || 960);
   const scale = Math.min(1, containerWidth / contentWidth);
   const displayHeight = Math.max(360, Math.round(contentHeight * scale));
-  const showCreateLinkAction = scene.nodes.some((node) => node.id === 'relation');
+  const showCreateLinkAction = scene.nodes.some((node) => node.id === 'relation') && !!relationCandidate;
 
   return (
     <div className="space-y-4">
@@ -710,7 +736,7 @@ function SankeySceneView({ scene }: { scene: SankeyScene }) {
         {showCreateLinkAction ? (
           <div className="mb-3 flex justify-end">
             <Button variant="outline" size="sm" onClick={() => setRelationDialogOpen(true)}>
-              执行动作：创建链接
+              {`执行动作：${relationActionVerb}`}
             </Button>
           </div>
         ) : null}
@@ -823,9 +849,11 @@ function SankeySceneView({ scene }: { scene: SankeyScene }) {
       <Dialog open={relationDialogOpen} onOpenChange={setRelationDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>是否确定创建链接</DialogTitle>
+            <DialogTitle>{`是否确定${relationActionVerb}`}</DialogTitle>
             <DialogDescription>
-              当前将为“宁德时代”与“中恒电气”创建一条“战略合作”关系链接。
+              {relationCandidate?.status === 'created'
+                ? `当前将删除“${relationCandidate?.sourceName || '宁德时代'}”与“${relationCandidate?.targetName || '中恒电气'}”之间的“${relationCandidate?.linkTypeName || '战略合作'}”关系链接。`
+                : `当前将为“${relationCandidate?.sourceName || '宁德时代'}”与“${relationCandidate?.targetName || '中恒电气'}”创建一条“${relationCandidate?.linkTypeName || '战略合作'}”关系链接。`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-2">
@@ -833,13 +861,18 @@ function SankeySceneView({ scene }: { scene: SankeyScene }) {
               取消
             </Button>
             <Button
-              onClick={() => {
-                setRelationWritebackLabel('已确认');
-                setRelationDialogOpen(false);
-                toast.success('操作成功：链接已创建');
+              disabled={creatingLink}
+              onClick={async () => {
+                if (!onCreateLink) return;
+                try {
+                  await onCreateLink();
+                  setRelationDialogOpen(false);
+                } catch (error: any) {
+                  toast.error(error.message || `${relationActionVerb}失败`);
+                }
               }}
             >
-              确定创建
+              {creatingLink ? `${relationActionVerb}中...` : `确定${relationActionVerb}`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -848,7 +881,17 @@ function SankeySceneView({ scene }: { scene: SankeyScene }) {
   );
 }
 
-export function EventPropagationExplorer({ eventTitle }: { eventTitle: string }) {
+export function EventPropagationExplorer({
+  eventTitle,
+  relationCandidate,
+  creatingLink,
+  onCreateLink,
+}: {
+  eventTitle: string;
+  relationCandidate?: RelationCandidate | null;
+  creatingLink?: boolean;
+  onCreateLink?: () => Promise<void> | void;
+}) {
   const scenario = useMemo(() => buildScenario(eventTitle), [eventTitle]);
 
   if (!scenario) {
@@ -861,7 +904,12 @@ export function EventPropagationExplorer({ eventTitle }: { eventTitle: string })
 
   return (
     <div className="space-y-4">
-      <SankeySceneView scene={scenario.scene} />
+      <SankeySceneView
+        scene={scenario.scene}
+        relationCandidate={relationCandidate}
+        creatingLink={creatingLink}
+        onCreateLink={onCreateLink}
+      />
     </div>
   );
 }

@@ -113,6 +113,66 @@ public class PriceTransmissionService {
             return Map.of("success", false, "error", e.getMessage());
         }
     }
+
+    public Map<String, Object> calculateObjectTypePriceTransmission(
+            String objectTypeId,
+            Double priceChangePercent,
+            Integer depth,
+            Double previousPrice,
+            Double latestPrice) {
+        if (!"lithium_carbonate".equals(objectTypeId)) {
+            return Map.of("success", false, "error", "当前仅支持 lithium_carbonate 的对象类型层价格传导分析");
+        }
+
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        List<Map<String, Object>> edges = new ArrayList<>();
+
+        double sourcePreviousPrice = isPositive(previousPrice)
+                ? previousPrice
+                : medianPriceOrDefault("lithium_carbonate", 12.50);
+        double sourceLatestPrice = isPositive(latestPrice)
+                ? latestPrice
+                : sourcePreviousPrice * (1 + priceChangePercent / 100);
+        double cathodeMedianPrice = medianPriceOrDefault("cathode_material", 8.40);
+        double electrolyteMedianPrice = medianPriceOrDefault("battery_electrolyte", 6.50);
+        double batteryCellMedianPrice = medianPriceOrDefault("battery_cell", 1.12);
+        double powerBatteryMedianPrice = medianPriceOrDefault("power_battery", 4.80);
+        double newEnergyVehicleMedianPrice = medianPriceOrDefault("new_energy_vehicle", 18.60);
+
+        nodes.add(buildObjectTypeNode("lithium_carbonate", "碳酸锂", "L1 / 原材料", sourcePreviousPrice, sourceLatestPrice, 0));
+        nodes.add(buildObjectTypeNode("cathode_material", "正极材料", "L2 / 正极材料", cathodeMedianPrice, applyChange(cathodeMedianPrice, priceChangePercent * 0.33), 1));
+        nodes.add(buildObjectTypeNode("battery_electrolyte", "电池电解液", "L2 / 电池电解液", electrolyteMedianPrice, applyChange(electrolyteMedianPrice, priceChangePercent * 0.57), 1));
+        nodes.add(buildObjectTypeNode("battery_cell", "电芯", "L3 / 电芯", batteryCellMedianPrice, applyChange(batteryCellMedianPrice, priceChangePercent * 0.46), 2));
+        nodes.add(buildObjectTypeNode("power_battery", "电池", "L4 / 电池", powerBatteryMedianPrice, applyChange(powerBatteryMedianPrice, priceChangePercent * 0.28), 3));
+        nodes.add(buildObjectTypeNode("new_energy_vehicle", "新能源汽车", "L5 / 新能源整车", newEnergyVehicleMedianPrice, applyChange(newEnergyVehicleMedianPrice, priceChangePercent * 0.11), 4));
+
+        edges.add(buildObjectTypeEdge("lithium_carbonate", "cathode_material", round(priceChangePercent * 0.33, 2)));
+        edges.add(buildObjectTypeEdge("lithium_carbonate", "battery_electrolyte", round(priceChangePercent * 0.57, 2)));
+        edges.add(buildObjectTypeEdge("cathode_material", "battery_cell", round(priceChangePercent * 0.30, 2)));
+        edges.add(buildObjectTypeEdge("battery_electrolyte", "battery_cell", round(priceChangePercent * 0.32, 2)));
+        edges.add(buildObjectTypeEdge("battery_cell", "power_battery", round(priceChangePercent * 0.28, 2)));
+        edges.add(buildObjectTypeEdge("power_battery", "new_energy_vehicle", round(priceChangePercent * 0.11, 2)));
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("objectTypeCount", nodes.size());
+        summary.put("edgeCount", edges.size());
+        summary.put("depth", depth);
+
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("objectTypeId", objectTypeId);
+        source.put("objectTypeName", "碳酸锂");
+        source.put("previousPrice", round(sourcePreviousPrice, 2));
+        source.put("latestPrice", round(sourceLatestPrice, 2));
+        source.put("priceChangePercent", round(priceChangePercent, 2));
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("sourceObjectType", source);
+        data.put("nodes", nodes);
+        data.put("edges", edges);
+        data.put("summary", summary);
+
+        return Map.of("success", true, "data", data);
+    }
     
     private Map<String, Object> querySourceInstance(String instanceId) {
         String sql = "SELECT * FROM lithium_carbonate WHERE unique_id = ?";
@@ -317,5 +377,62 @@ public class PriceTransmissionService {
     private double round(double value, int places) {
         double factor = Math.pow(10, places);
         return Math.round(value * factor) / factor;
+    }
+
+    private double applyChange(double basePrice, double percent) {
+        return round(basePrice * (1 + percent / 100), 2);
+    }
+
+    private boolean isPositive(Double value) {
+        return value != null && value > 0;
+    }
+
+    private double medianPriceOrDefault(String tableName, double defaultValue) {
+        try {
+            String sql = String.format(
+                    "SELECT price FROM %s WHERE price IS NOT NULL AND price > 0 ORDER BY price ASC",
+                    tableName
+            );
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+            if (rows.isEmpty()) {
+                return defaultValue;
+            }
+
+            int size = rows.size();
+            if (size % 2 == 1) {
+                Object middle = rows.get(size / 2).get("price");
+                return middle == null ? defaultValue : ((Number) middle).doubleValue();
+            }
+
+            Object left = rows.get(size / 2 - 1).get("price");
+            Object right = rows.get(size / 2).get("price");
+            if (left == null || right == null) {
+                return defaultValue;
+            }
+            return (((Number) left).doubleValue() + ((Number) right).doubleValue()) / 2.0;
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
+    private Map<String, Object> buildObjectTypeNode(String id, String name, String subtitle, double previousPrice, double latestPrice, int level) {
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("id", id);
+        node.put("name", name);
+        node.put("subtitle", subtitle);
+        node.put("previousPrice", round(previousPrice, 2));
+        node.put("latestPrice", round(latestPrice, 2));
+        node.put("priceChangePercent", round(((latestPrice - previousPrice) / previousPrice) * 100, 2));
+        node.put("level", level);
+        return node;
+    }
+
+    private Map<String, Object> buildObjectTypeEdge(String source, String target, double coefficient) {
+        Map<String, Object> edge = new LinkedHashMap<>();
+        edge.put("source", source);
+        edge.put("target", target);
+        edge.put("coefficient", coefficient);
+        edge.put("label", "传导系数 " + (coefficient >= 0 ? "+" : "") + round(coefficient, 2) + "%");
+        return edge;
     }
 }

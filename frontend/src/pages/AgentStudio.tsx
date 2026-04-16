@@ -40,6 +40,9 @@ import { EventPropagationExplorer } from '@/src/components/EventPropagationExplo
 import { cn } from '@/src/lib/utils';
 import { searchStocks, StockItem } from '@/src/data/cnStocks';
 
+const DEMO_LITHIUM_AGENT_ID = 'demo_agent_lithium';
+const MANUAL_LITHIUM_BASE_PRICE = 12.5;
+
 interface Agent {
   id: string;
   name: string;
@@ -85,36 +88,42 @@ interface AgentAnalysis {
   recommendation: string;
   created_at: string;
   transmissionData?: PriceTransmissionData;
+  isTemporary?: boolean;
 }
 
 interface PriceTransmissionSource {
-  id: string;
-  name: string | null;
+  objectTypeId: string;
+  objectTypeName: string;
   previousPrice: number;
   latestPrice: number;
   priceChangePercent: number;
 }
 
-interface PriceTransmissionAffectedInstance {
+interface PriceTransmissionNode {
   id: string;
-  objectTypeId: string;
-  objectTypeName: string;
   name: string;
-  relationPath: string;
-  relationDepth: number;
+  subtitle: string;
   previousPrice: number;
-  transmissionCoefficient: number;
   latestPrice: number;
-  priceChangeAmount: number;
+  priceChangePercent: number;
+  level: number;
+}
+
+interface PriceTransmissionEdge {
+  source: string;
+  target: string;
+  coefficient: number;
+  label: string;
 }
 
 interface PriceTransmissionData {
-  sourceInstance: PriceTransmissionSource;
-  transmissionCoefficient: number;
-  affectedInstances: PriceTransmissionAffectedInstance[];
+  sourceObjectType: PriceTransmissionSource;
+  nodes: PriceTransmissionNode[];
+  edges: PriceTransmissionEdge[];
   summary: {
-    totalAffectedInstances: number;
-    totalPriceChangeAmount: number;
+    objectTypeCount: number;
+    edgeCount: number;
+    depth: number;
   };
 }
 
@@ -124,9 +133,23 @@ interface HotEventItem {
   category: string;
   occurredAt: string;
   summary: string;
+  content?: string;
+  source?: string;
   tags: string[];
-  targetCompanies: string[];
   commentary: string;
+  candidate?: {
+    id: string;
+    status: string;
+    sourceInstanceId: string;
+    sourceName: string;
+    targetInstanceId: string;
+    targetName: string;
+    linkTypeId: string;
+    linkTypeName: string;
+    confidence?: number;
+    evidence?: string;
+    llmSource?: string;
+  } | null;
 }
 
 type InsightSummaryItem = {
@@ -232,71 +255,6 @@ const MOCK_EVENTS: Record<string, AgentEvent[]> = {
   ],
 };
 
-const LITHIUM_TRANSMISSION_DATA: PriceTransmissionData = {
-  sourceInstance: {
-    id: 'LC-BT-001-2024',
-    name: null,
-    previousPrice: 12.5,
-    latestPrice: 15.63,
-    priceChangePercent: 25,
-  },
-  transmissionCoefficient: 18,
-  affectedInstances: [
-    {
-      id: 'EL-FD-001-2024',
-      objectTypeId: 'battery_electrolyte',
-      objectTypeName: '电池电解液',
-      name: 'EL-FD-001-2024',
-      relationPath: 'LC-BT-001-2024 → EL-FD-001-2024',
-      relationDepth: 1,
-      previousPrice: 5.8,
-      transmissionCoefficient: 14.4,
-      latestPrice: 6.64,
-      priceChangeAmount: 0.84,
-    },
-    {
-      id: 'EL-FD-002-2024',
-      objectTypeId: 'battery_electrolyte',
-      objectTypeName: '电池电解液',
-      name: 'EL-FD-002-2024',
-      relationPath: 'LC-BT-001-2024 → EL-FD-002-2024',
-      relationDepth: 1,
-      previousPrice: 6.5,
-      transmissionCoefficient: 14.4,
-      latestPrice: 7.44,
-      priceChangeAmount: 0.94,
-    },
-    {
-      id: 'EL-SS-001-2024',
-      objectTypeId: 'battery_electrolyte',
-      objectTypeName: '电池电解液',
-      name: 'EL-SS-001-2024',
-      relationPath: 'LC-BT-001-2024 → EL-SS-001-2024',
-      relationDepth: 1,
-      previousPrice: 12.5,
-      transmissionCoefficient: 14.4,
-      latestPrice: 14.3,
-      priceChangeAmount: 1.8,
-    },
-    {
-      id: 'BC-PANA-001-2024',
-      objectTypeId: 'battery_cell',
-      objectTypeName: '电芯',
-      name: 'BC-PANA-001-2024',
-      relationPath: 'LC-BT-001-2024 → ... → BC-PANA-001-2024',
-      relationDepth: 2,
-      previousPrice: 1.12,
-      transmissionCoefficient: 11.52,
-      latestPrice: 1.25,
-      priceChangeAmount: 0.13,
-    },
-  ],
-  summary: {
-    totalAffectedInstances: 4,
-    totalPriceChangeAmount: 3.71,
-  },
-};
-
 const MOCK_ANALYSES: Record<string, AgentAnalysis[]> = {
   demo_agent_byd: [
     {
@@ -320,24 +278,7 @@ const MOCK_ANALYSES: Record<string, AgentAnalysis[]> = {
     },
   ],
   demo_agent_lithium: [
-    {
-      id: 'ana_lithium_1',
-      agent_id: 'demo_agent_lithium',
-      event_id: 'evt_lithium_1',
-      title: '碳酸锂价格上涨 25% 带来的成本传导重估',
-      content:
-        '碳酸锂价格快速上行后，成本并不会一次性传导到所有下游环节，而是沿着“锂盐 - 电解液 - 电芯 - 动力电池”的链路逐级扩散。当前更值得观察的是：电解液和电芯的提价速度是否快于市场预期，以及这种成本压力最终会给电池和整车利润带来多大挤压。',
-      key_findings: [
-        '碳酸锂价格已从 12.50 上涨至 15.63，单轮涨幅约 25%。',
-        '一阶受影响的是电解液环节，价格传导系数约为 +14.4%。',
-        '二阶传导已延伸至电芯实例，后续需继续观察动力电池与整车端的成本承压与提价能力。',
-      ],
-      impact_chain: [],
-      recommendation: '继续跟踪电解液、电芯与动力电池的跟涨幅度，判断成本压力会更多由中游吸收，还是继续向下游整车端传导。',
-      created_at: '2026-04-15 07:18:00',
-      transmissionData: LITHIUM_TRANSMISSION_DATA,
-    },
-  ],
+    ],
 };
 
 const MOCK_HOT_EVENTS: HotEventItem[] = [
@@ -347,9 +288,9 @@ const MOCK_HOT_EVENTS: HotEventItem[] = [
     category: '关系发现',
     occurredAt: '2026-04-13',
     summary: '合作消息触发市场对储能产业链关系的重新梳理，研究员希望进一步确认合作关系是否足以沉淀为图谱中的正式关系。',
-    tags: ['储能', '合作关系', '图谱写回'],
-    targetCompanies: ['宁德时代', '中恒电气'],
-    commentary: '这类事件不仅影响市场情绪，更适合作为图谱关系发现与审核写回的演示样本，便于串联 AI 工坊与本体图谱协作场景。',
+    tags: ['储能', '合作关系'],
+    commentary: '宁德时代与中恒电气围绕储能场景展开协同合作，说明电池能力与储能设备能力正在向系统级解决方案靠拢。对产业链而言，这类合作不仅意味着项目协同和客户拓展的可能性提升，也可能推动储能系统集成、站端设备和交付能力的联动强化。',
+    candidate: null,
   },
   {
     id: 'hot_1',
@@ -358,8 +299,8 @@ const MOCK_HOT_EVENTS: HotEventItem[] = [
     occurredAt: '2026-04-15',
     summary: '政策端继续强调充电基础设施建设和补能网络完善，市场关注其对充电运营、设备制造及整车消费渗透的带动效应。',
     tags: ['充电基础设施', '高压快充', '新能源汽车'],
-    targetCompanies: ['比亚迪', '特锐德', '中恒电气', '永贵电器'],
     commentary: '市场对该事件的第一反应通常停留在“利好充电桩设备商”，但真正更有弹性的往往是高压快充相关零部件与使用体验改善后带来的整车需求二阶扩散。',
+    candidate: null,
   },
 ];
 
@@ -382,6 +323,59 @@ function timeAgo(dateStr: string | null) {
   if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
   if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
   return `${Math.floor(diff / 86400)} 天前`;
+}
+
+function safeParseJson<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  if (typeof value !== 'string') return value as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function mapBackendEvent(raw: any): AgentEvent {
+  return {
+    id: raw.id,
+    agent_id: raw.agentId || raw.agent_id,
+    title: raw.title || '',
+    summary: raw.summary || '',
+    source: raw.source || '',
+    source_url: raw.sourceUrl || raw.source_url || '',
+    event_date: raw.eventDate || raw.event_date || '',
+    impact_level: (raw.impactLevel || raw.impact_level || 'medium') as AgentEvent['impact_level'],
+    related_entities: safeParseJson<string[]>(raw.relatedEntities || raw.related_entities, []),
+    created_at: raw.createdAt || raw.created_at || '',
+  };
+}
+
+function mapBackendAnalysis(raw: any): AgentAnalysis {
+  const parsedImpactChain = safeParseJson<any>(raw.impactChain || raw.impact_chain, []);
+  const transmissionDataCandidate =
+    parsedImpactChain && !Array.isArray(parsedImpactChain) && parsedImpactChain.type === 'price_transmission_object_type'
+      ? parsedImpactChain.data
+      : undefined;
+  const transmissionData =
+    transmissionDataCandidate &&
+    Array.isArray(transmissionDataCandidate.nodes) &&
+    Array.isArray(transmissionDataCandidate.edges) &&
+    transmissionDataCandidate.sourceObjectType
+      ? transmissionDataCandidate
+      : undefined;
+
+  return {
+    id: raw.id,
+    agent_id: raw.agentId || raw.agent_id,
+    event_id: raw.eventId || raw.event_id || null,
+    title: raw.title || '',
+    content: raw.content || '',
+    key_findings: safeParseJson<string[]>(raw.keyFindings || raw.key_findings, []),
+    impact_chain: Array.isArray(parsedImpactChain) ? parsedImpactChain : [],
+    recommendation: raw.recommendation || '',
+    created_at: raw.createdAt || raw.created_at || '',
+    transmissionData,
+  };
 }
 
 function formatSignedNumber(value: number, fractionDigits = 2) {
@@ -505,27 +499,27 @@ function getEventInsight(title: string): EventInsightContent | null {
 
   if (normalized.includes('中恒电气') || normalized.includes('合作')) {
     return {
-      title: '合作关系带来的图谱关系发现',
-      badge: '关系发现样本',
-      conclusion: '这类合作事件既能服务研究解读，也很适合演示“候选关系识别 - 研究员确认 - 图谱写回”的协同链路。',
+      title: '储能协同合作带来的产业链信号',
+      badge: '合作进展',
+      conclusion: '宁德时代与中恒电气的合作更像是储能场景下的能力互补，反映出电池企业与设备企业正在共同争取系统级项目机会。',
       summaryItems: [
-        { label: '事件定性', value: '关系发现类样本' },
-        { label: '预期差', value: '新闻不只是情绪催化，也能沉淀为结构化知识' },
-        { label: '策略建议', value: '优先抽取合作对象、合作类型、业务范围与证据片段' },
-        { label: '核心逻辑', value: '从文本证据到图谱关系的结构化迁移' },
+        { label: '事件定性', value: '储能产业链协同深化' },
+        { label: '预期差', value: '市场容易只看概念催化，忽略系统集成与项目拓展价值' },
+        { label: '策略建议', value: '重点跟踪合作范围是否落到项目订单、客户导入和方案共建' },
+        { label: '核心逻辑', value: '电池能力 + 设备能力 + 场景落地' },
       ],
       sections: [
         {
           title: '一、事件概述',
-          paragraphs: ['事件中的合作主体、合作方向和业务边界都适合沉淀成图谱中的候选关系。'],
+          paragraphs: ['从新闻内容看，双方合作重点不只是单点采购，而是围绕储能系统集成、站端设备协同和项目拓展展开，合作边界明显更偏向场景化落地。'],
         },
         {
           title: '二、深度点评',
-          paragraphs: ['对于研究员而言，这是热点解读；对于本体平台而言，这又是很好的关系发现入口。'],
+          paragraphs: ['这类合作背后的关键，不在于短期情绪刺激，而在于储能项目越来越强调成套方案能力。宁德时代提供电池与系统侧能力，中恒电气补强设备与站端协同，两者结合有助于提升项目交付完整度。'],
           bullets: [
-            '优先抽取关系主体与合作类型。',
-            '保留原始文本证据，便于后续审核与追溯。',
-            '写回图谱后可用于后续事件推理和关系联动分析。',
+            '若合作继续深化，首先受益的会是储能项目获取与方案协同效率。',
+            '市场后续更需要验证合作是否对应新增订单、联合解决方案或重点客户突破。',
+            '如果双方在系统级交付上形成稳定配合，合作意义会明显高于一次性新闻催化。',
           ],
         },
       ],
@@ -853,6 +847,7 @@ function TransmissionNodeCard({
   objectTypeId: string;
 }) {
   const accent = getTransmissionAccent(objectTypeId);
+  const priceDisplay = formatTransmissionPrice(previousPrice, latestPrice, objectTypeId);
 
   return (
     <div className={cn('w-full rounded-[26px] border bg-white p-4 shadow-[0_16px_32px_rgba(15,23,42,0.08)]', accent.card)}>
@@ -872,87 +867,67 @@ function TransmissionNodeCard({
       <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/80 px-3 py-3 text-xs">
         <p className="text-slate-400">价格变化</p>
         <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
-          <span>{previousPrice.toFixed(2)}</span>
+          <span>{priceDisplay.previous}</span>
           <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
-          <span>{latestPrice.toFixed(2)}</span>
+          <span>{priceDisplay.latest}</span>
         </div>
+        <p className="mt-1 text-[11px] text-slate-400">{priceDisplay.unitLabel}</p>
       </div>
     </div>
   );
 }
 
-function PriceTransmissionGraph({ data }: { data: PriceTransmissionData }) {
-  const chainNodes = [
-    {
-      id: 'lithium',
-      title: '碳酸锂',
-      subtitle: 'L1 / 原材料',
-      previousPrice: 12.5,
-      latestPrice: 15.63,
-      objectTypeId: 'lithium_carbonate',
-      x: 80,
-      y: 170,
-    },
-    {
-      id: 'cathode',
-      title: '正极材料',
-      subtitle: 'L2 / 正极材料',
-      previousPrice: 8.4,
-      latestPrice: 9.10,
-      objectTypeId: 'cathode_material',
-      x: 350,
-      y: 40,
-    },
-    {
-      id: 'electrolyte',
-      title: '电池电解液',
-      subtitle: 'L2 / 电池电解液',
-      previousPrice: 6.5,
-      latestPrice: 7.44,
-      objectTypeId: 'battery_electrolyte',
-      x: 350,
-      y: 290,
-    },
-    {
-      id: 'cell',
-      title: '电芯',
-      subtitle: 'L3 / 电芯',
-      previousPrice: 1.12,
-      latestPrice: 1.25,
-      objectTypeId: 'battery_cell',
-      x: 650,
-      y: 170,
-    },
-    {
-      id: 'battery',
-      title: '电池',
-      subtitle: 'L4 / 电池',
-      previousPrice: 4.8,
-      latestPrice: 5.14,
-      objectTypeId: 'power_battery',
-      x: 930,
-      y: 170,
-    },
-    {
-      id: 'vehicle',
-      title: '新能源汽车',
-      subtitle: 'L5 / 新能源整车',
-      previousPrice: 18.6,
-      latestPrice: 19.10,
-      objectTypeId: 'new_energy_vehicle',
-      x: 1210,
-      y: 170,
-    },
-  ];
+function formatTransmissionPrice(previousPrice: number, latestPrice: number, objectTypeId: string) {
+  const config = (() => {
+    if (objectTypeId === 'lithium_carbonate') return { divisor: 1, unitLabel: '单位：万元 / 吨', decimals: 2 };
+    if (objectTypeId === 'cathode_material') return { divisor: 1, unitLabel: '单位：万元 / 吨', decimals: 2 };
+    if (objectTypeId === 'battery_electrolyte') return { divisor: 1, unitLabel: '单位：万元 / 吨', decimals: 2 };
+    if (objectTypeId === 'battery_cell') return { divisor: 1, unitLabel: '单位：元 / Wh', decimals: 2 };
+    if (objectTypeId === 'power_battery') return { divisor: 10000, unitLabel: '单位：万元 / 套', decimals: 2 };
+    if (objectTypeId === 'new_energy_vehicle') return { divisor: 1, unitLabel: '单位：万元 / 辆', decimals: 2 };
+    return { divisor: 1, unitLabel: '单位：当前表价格口径', decimals: 2 };
+  })();
 
-  const edges = [
-    { from: 'lithium', to: 'cathode', label: '传导系数 +8.3%' },
-    { from: 'lithium', to: 'electrolyte', label: '传导系数 +14.4%' },
-    { from: 'cathode', to: 'cell', label: '传导系数 +7.6%' },
-    { from: 'electrolyte', to: 'cell', label: '传导系数 +8.0%' },
-    { from: 'cell', to: 'battery', label: '传导系数 +7.1%' },
-    { from: 'battery', to: 'vehicle', label: '传导系数 +2.7%' },
-  ];
+  const formatValue = (value: number) => (value / config.divisor).toFixed(config.decimals);
+
+  return {
+    previous: formatValue(previousPrice),
+    latest: formatValue(latestPrice),
+    unitLabel: config.unitLabel,
+  };
+}
+
+function PriceTransmissionGraph({ data }: { data: PriceTransmissionData }) {
+  if (!Array.isArray(data.nodes) || !Array.isArray(data.edges) || !data.sourceObjectType) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+        当前传导结果结构不完整，暂时无法展示价格传导图。
+      </div>
+    );
+  }
+
+  const nodePositions: Record<string, { x: number; y: number }> = {
+    lithium_carbonate: { x: 80, y: 170 },
+    cathode_material: { x: 350, y: 40 },
+    battery_electrolyte: { x: 350, y: 290 },
+    battery_cell: { x: 650, y: 170 },
+    power_battery: { x: 930, y: 170 },
+    new_energy_vehicle: { x: 1210, y: 170 },
+  };
+
+  const chainNodes = data.nodes.map((node) => ({
+    ...node,
+    objectTypeId: node.id,
+    x: nodePositions[node.id]?.x ?? 80,
+    y: nodePositions[node.id]?.y ?? 170,
+    title: node.name,
+  }));
+
+  const edges = data.edges.map((edge) => ({
+    from: edge.source,
+    to: edge.target,
+    label: edge.label,
+  }));
   const CARD_WIDTH = 220;
   const CARD_HEIGHT = 128;
   const CANVAS_WIDTH = 1450;
@@ -1000,16 +975,16 @@ function PriceTransmissionGraph({ data }: { data: PriceTransmissionData }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h5 className="text-sm font-semibold text-slate-900">价格传导图</h5>
-          <p className="mt-1 text-xs text-slate-500">以本体图谱风格展示碳酸锂价格下探如何沿材料、电芯、电池一路传导到整车端。</p>
+            <p className="mt-1 text-xs text-slate-500">以本体图谱风格展示碳酸锂价格变化如何沿对象类型层逐级传导到下游环节。</p>
         </div>
         <div className="flex gap-2">
           <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-right shadow-sm">
             <p className="text-[11px] text-slate-400">传导节点</p>
-            <p className="text-sm font-semibold text-slate-900">6</p>
+            <p className="text-sm font-semibold text-slate-900">{data.summary.objectTypeCount}</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-right shadow-sm">
             <p className="text-[11px] text-slate-400">源头涨幅</p>
-            <p className="text-sm font-semibold text-red-600">{formatSignedNumber(data.sourceInstance.priceChangePercent)}%</p>
+            <p className="text-sm font-semibold text-red-600">{formatSignedNumber(data.sourceObjectType.priceChangePercent)}%</p>
           </div>
         </div>
       </div>
@@ -1060,8 +1035,8 @@ function PriceTransmissionGraph({ data }: { data: PriceTransmissionData }) {
           ))}
 
           <div className="mt-6 flex items-center justify-between px-2 text-[11px] text-slate-400">
-            <span>原材料价格先上行，再逐级传导到中游与终端。</span>
-            <span>传导系数为静态演示数据，用于说明价格影响路径。</span>
+            <span>对象类型层价格冲击先作用于材料，再逐级传导到中游与终端。</span>
+            <span>传导系数来自对象类型层价格传导分析函数输出。</span>
           </div>
         </div>
       </div>
@@ -1069,7 +1044,15 @@ function PriceTransmissionGraph({ data }: { data: PriceTransmissionData }) {
   );
 }
 
-function AnalysisReport({ analysis }: { analysis: AgentAnalysis }) {
+function AnalysisReport({
+  analysis,
+  deleting = false,
+  onDelete,
+}: {
+  analysis: AgentAnalysis;
+  deleting?: boolean;
+  onDelete?: (analysis: AgentAnalysis) => Promise<void> | void;
+}) {
   const [expanded, setExpanded] = useState(true);
 
   return (
@@ -1081,8 +1064,22 @@ function AnalysisReport({ analysis }: { analysis: AgentAnalysis }) {
         <FileText className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-slate-900">{analysis.title}</h3>
-          {!analysis.transmissionData ? <p className="mt-0.5 text-xs text-slate-400">{timeAgo(analysis.created_at)}</p> : null}
+          <p className="mt-0.5 text-xs text-slate-400">{timeAgo(analysis.created_at)}</p>
         </div>
+        {onDelete ? (
+          <button
+            type="button"
+            className="rounded-md p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+            onClick={async (event) => {
+              event.stopPropagation();
+              await onDelete(analysis);
+            }}
+            disabled={deleting}
+            title="删除分析报告"
+          >
+            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+          </button>
+        ) : null}
         {expanded ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
       </div>
 
@@ -1319,9 +1316,101 @@ function EventInsightCard({ event }: { event: HotEventItem }) {
 }
 
 function HotEventInterpretationPanel() {
-  const [selectedId, setSelectedId] = useState<string | null>(MOCK_HOT_EVENTS[0]?.id || null);
-  const events = useMemo(() => [...MOCK_HOT_EVENTS], []);
+  const [events, setEvents] = useState<HotEventItem[]>(MOCK_HOT_EVENTS);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [creatingLink, setCreatingLink] = useState(false);
   const selectedEvent = events.find((item) => item.id === selectedId) || null;
+
+  useEffect(() => {
+    let mounted = true;
+    api
+      .getTrackedEvents()
+      .then((result) => {
+        if (!mounted || !result.events?.length) return;
+        const nextEvents = result.events.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          category: item.category,
+          occurredAt: item.occurredAt,
+          summary: item.summary,
+          content: item.content,
+          source: item.source,
+          tags: Array.isArray(item.tags) ? item.tags : [],
+          commentary:
+            item.title.includes('宁德时代') || item.title.includes('中恒电气')
+              ? '宁德时代与中恒电气围绕储能场景展开协同合作，反映出电池能力与储能设备能力正在向系统级方案整合。后续更值得关注的是合作是否进一步落到联合项目、方案共建和客户拓展上。'
+              : '市场对该事件的第一反应通常停留在“利好充电桩设备商”，但真正更有弹性的往往是高压快充相关零部件与使用体验改善后带来的整车需求二阶扩散。',
+          candidate: item.candidate || null,
+        }));
+        setEvents(nextEvents);
+        setSelectedId(nextEvents[0]?.id || null);
+      })
+      .catch(() => {
+        // keep fallback data
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedEvent) return;
+    if (loading) return;
+    if (selectedEvent.candidate) return;
+    if (!(selectedEvent.title.includes('宁德时代') || selectedEvent.title.includes('中恒电气'))) return;
+
+    let cancelled = false;
+    setAnalyzing(true);
+    api
+      .analyzeTrackedEvent(selectedEvent.id)
+      .then((result) => {
+        if (cancelled || !result.candidate) return;
+        setEvents((prev) =>
+          prev.map((item) => (item.id === selectedEvent.id ? { ...item, candidate: result.candidate } : item)),
+        );
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          toast.error(error.message || '关系识别失败');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAnalyzing(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEvent, loading]);
+
+  const handleToggleLink = async () => {
+    if (!selectedEvent?.candidate) return;
+    setCreatingLink(true);
+    try {
+      const nextStatus = selectedEvent.candidate.status === 'created' ? 'recognized' : 'created';
+      if (nextStatus === 'created') {
+        await api.createEventCandidateLink(selectedEvent.candidate.id);
+      } else {
+        await api.deleteEventCandidateLink(selectedEvent.candidate.id);
+      }
+      setEvents((prev) =>
+        prev.map((item) =>
+          item.id === selectedEvent.id && item.candidate
+            ? { ...item, candidate: { ...item.candidate, status: nextStatus } }
+            : item,
+        ),
+      );
+      toast.success(nextStatus === 'created' ? '链接已创建' : '链接已删除');
+    } finally {
+      setCreatingLink(false);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0">
@@ -1351,7 +1440,9 @@ function HotEventInterpretationPanel() {
       </aside>
 
       <section className="min-w-0 flex-1 overflow-y-auto bg-slate-50 p-6">
-        {!selectedEvent ? (
+        {loading ? (
+          <div className="flex h-full items-center justify-center text-slate-400">正在加载事件...</div>
+        ) : !selectedEvent ? (
           <div className="flex h-full items-center justify-center text-slate-400">暂无热点事件</div>
         ) : (
           <div className="space-y-5">
@@ -1373,11 +1464,11 @@ function HotEventInterpretationPanel() {
               </div>
             </div>
 
-            {selectedEvent.targetCompanies.length > 0 ? (
+            {selectedEvent.candidate ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="mb-3 font-semibold text-slate-900">重点标的</div>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {selectedEvent.targetCompanies.map((company) => (
+                  {[selectedEvent.candidate.sourceName, selectedEvent.candidate.targetName].map((company) => (
                     <div key={company} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800">
                       {company}
                     </div>
@@ -1391,7 +1482,12 @@ function HotEventInterpretationPanel() {
                 <Activity className="h-4 w-4 text-purple-500" />
                 事件传导图
               </div>
-              <EventPropagationExplorer eventTitle={selectedEvent.title} />
+              <EventPropagationExplorer
+                eventTitle={selectedEvent.title}
+                relationCandidate={selectedEvent.candidate || null}
+                creatingLink={creatingLink || analyzing}
+                onCreateLink={handleToggleLink}
+              />
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1650,11 +1746,58 @@ export function AgentStudio() {
   const [running, setRunning] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'events' | 'analyses'>('analyses');
   const [mainTab, setMainTab] = useState<'agents' | 'hot' | 'qa'>('agents');
+  const [manualLithiumPrice, setManualLithiumPrice] = useState('20.00');
+  const [manualGenerating, setManualGenerating] = useState(false);
+  const [deletingAnalysisId, setDeletingAnalysisId] = useState<string | null>(null);
 
   const selectedAgent = useMemo(() => agents.find((agent) => agent.id === selectedId) || null, [agents, selectedId]);
   const isPriceTrackingAgent = selectedAgent?.id === 'demo_agent_lithium';
   const events = selectedId ? eventsByAgent[selectedId] || [] : [];
   const analyses = selectedId ? analysesByAgent[selectedId] || [] : [];
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLithiumRuntimeData = async () => {
+      try {
+        const [eventsResult, analysesResult] = await Promise.all([
+          api.getAgentEvents(DEMO_LITHIUM_AGENT_ID),
+          api.getAgentAnalyses(DEMO_LITHIUM_AGENT_ID),
+        ]);
+
+        if (cancelled) return;
+
+        const nextEvents = (eventsResult.events || []).map(mapBackendEvent);
+        const nextAnalyses = (analysesResult.analyses || []).map(mapBackendAnalysis);
+
+        if (nextEvents.length > 0) {
+          setEventsByAgent((prev) => ({ ...prev, [DEMO_LITHIUM_AGENT_ID]: nextEvents }));
+        }
+
+        if (nextAnalyses.length > 0) {
+          setAnalysesByAgent((prev) => ({ ...prev, [DEMO_LITHIUM_AGENT_ID]: nextAnalyses }));
+          const latestRunAt = nextAnalyses[0]?.created_at || nextEvents[0]?.created_at || null;
+          if (latestRunAt) {
+            setAgents((prev) =>
+              prev.map((agent) =>
+                agent.id === DEMO_LITHIUM_AGENT_ID
+                  ? { ...agent, last_run_at: latestRunAt, updated_at: latestRunAt }
+                  : agent,
+              ),
+            );
+          }
+        }
+      } catch {
+        // keep demo fallback
+      }
+    };
+
+    loadLithiumRuntimeData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (selectedAgent?.id === 'demo_agent_lithium' && detailTab !== 'analyses') {
@@ -1675,36 +1818,67 @@ export function AgentStudio() {
 
   const handleRun = async (agentId: string) => {
     setRunning(agentId);
-    await wait(5000);
-    const agent = agents.find((item) => item.id === agentId) || null;
-    const shouldSeedDemo = agent && (eventsByAgent[agentId] || []).length === 0 && (analysesByAgent[agentId] || []).length === 0;
-    const starterEvent = shouldSeedDemo && agent ? createStarterEvent(agent) : null;
-    const starterAnalysis = shouldSeedDemo && agent && starterEvent ? createStarterAnalysis(agent, starterEvent) : null;
+    try {
+      if (agentId === DEMO_LITHIUM_AGENT_ID) {
+        await api.runResearchAgent(agentId);
+        const [eventsResult, analysesResult] = await Promise.all([
+          api.getAgentEvents(agentId),
+          api.getAgentAnalyses(agentId),
+        ]);
+        const nextEvents = (eventsResult.events || []).map(mapBackendEvent);
+        const nextAnalyses = (analysesResult.analyses || []).map(mapBackendAnalysis);
+        const latestRunAt = nextAnalyses[0]?.created_at || nextEvents[0]?.created_at || formatDateTime(new Date());
 
-    setAgents((prev) =>
-      prev.map((agent) =>
-        agent.id === agentId
-          ? {
-              ...agent,
-              last_run_at: formatDateTime(new Date()),
-              updated_at: formatDateTime(new Date()),
-            }
-          : agent,
-      ),
-    );
+        setAgents((prev) =>
+          prev.map((agent) =>
+            agent.id === agentId
+              ? {
+                  ...agent,
+                  last_run_at: latestRunAt,
+                  updated_at: latestRunAt,
+                }
+              : agent,
+          ),
+        );
+        setEventsByAgent((prev) => ({ ...prev, [agentId]: nextEvents }));
+        setAnalysesByAgent((prev) => ({ ...prev, [agentId]: nextAnalyses }));
+        toast.success('数据已刷新');
+      } else {
+        await wait(5000);
+        const agent = agents.find((item) => item.id === agentId) || null;
+        const shouldSeedDemo = agent && (eventsByAgent[agentId] || []).length === 0 && (analysesByAgent[agentId] || []).length === 0;
+        const starterEvent = shouldSeedDemo && agent ? createStarterEvent(agent) : null;
+        const starterAnalysis = shouldSeedDemo && agent && starterEvent ? createStarterAnalysis(agent, starterEvent) : null;
 
-    setEventsByAgent((prev) => {
-      if (!starterEvent) return prev;
-      return { ...prev, [agentId]: [starterEvent] };
-    });
+        setAgents((prev) =>
+          prev.map((agent) =>
+            agent.id === agentId
+              ? {
+                  ...agent,
+                  last_run_at: formatDateTime(new Date()),
+                  updated_at: formatDateTime(new Date()),
+                }
+              : agent,
+          ),
+        );
 
-    setAnalysesByAgent((prev) => {
-      if (!starterAnalysis) return prev;
-      return { ...prev, [agentId]: [starterAnalysis] };
-    });
+        setEventsByAgent((prev) => {
+          if (!starterEvent) return prev;
+          return { ...prev, [agentId]: [starterEvent] };
+        });
 
-    setRunning(null);
-    toast.success('数据已刷新');
+        setAnalysesByAgent((prev) => {
+          if (!starterAnalysis) return prev;
+          return { ...prev, [agentId]: [starterAnalysis] };
+        });
+
+        toast.success('数据已刷新');
+      }
+    } catch (error: any) {
+      toast.error(error.message || '运行失败');
+    } finally {
+      setRunning(null);
+    }
   };
 
   const handleDelete = (agentId: string) => {
@@ -1722,6 +1896,58 @@ export function AgentStudio() {
     });
     setSelectedId((prev) => (prev === agentId ? remainingAgents[0]?.id || null : prev));
     toast.success('标的跟踪已删除');
+  };
+
+  const handleGenerateManualLithiumAnalysis = async () => {
+    if (!selectedAgent || selectedAgent.id !== DEMO_LITHIUM_AGENT_ID) return;
+
+    const latestPrice = Number.parseFloat(manualLithiumPrice);
+    if (!Number.isFinite(latestPrice) || latestPrice <= 0) {
+      toast.error('请输入有效的碳酸锂最新价格');
+      return;
+    }
+
+    setManualGenerating(true);
+    try {
+      const result = await api.createManualLithiumAnalysis(DEMO_LITHIUM_AGENT_ID, {
+        previousPrice: MANUAL_LITHIUM_BASE_PRICE,
+        latestPrice,
+        depth: 4,
+      });
+
+      const analysis = mapBackendAnalysis(result.analysis);
+      analysis.isTemporary = false;
+      setAnalysesByAgent((prev) => ({
+        ...prev,
+        [DEMO_LITHIUM_AGENT_ID]: [analysis, ...(prev[DEMO_LITHIUM_AGENT_ID] || [])],
+      }));
+      toast.success('价格传导分析已生成');
+    } catch (error: any) {
+      toast.error(error.message || '价格传导分析生成失败');
+    } finally {
+      setManualGenerating(false);
+    }
+  };
+
+  const handleDeleteAnalysis = async (analysis: AgentAnalysis) => {
+    if (!selectedAgent) return;
+
+    setDeletingAnalysisId(analysis.id);
+    try {
+      if (!analysis.isTemporary) {
+        await api.deleteAgentAnalysis(selectedAgent.id, analysis.id);
+      }
+
+      setAnalysesByAgent((prev) => ({
+        ...prev,
+        [selectedAgent.id]: (prev[selectedAgent.id] || []).filter((item) => item.id !== analysis.id),
+      }));
+      toast.success('分析报告已删除');
+    } catch (error: any) {
+      toast.error(error.message || '删除分析报告失败');
+    } finally {
+      setDeletingAnalysisId(null);
+    }
   };
 
   return (
@@ -1853,7 +2079,7 @@ export function AgentStudio() {
                       {selectedAgent.is_active ? '● 运行中' : '○ 已暂停'}
                     </span>
                     <Button size="sm" onClick={() => handleRun(selectedAgent.id)} disabled={running === selectedAgent.id} className="gap-1.5">
-                      {running === selectedAgent.id ? (
+	              {running === selectedAgent.id ? (
                         <>
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           运行中...
@@ -1896,9 +2122,52 @@ export function AgentStudio() {
                     <span className="ml-2 text-blue-500">正在同步最新数据</span>
                   </div>
                 </div>
+	              ) : null}
+
+              {isPriceTrackingAgent ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex flex-wrap items-end justify-between gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">价格传导分析</h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        输入碳酸锂最新价格，系统将以 {MANUAL_LITHIUM_BASE_PRICE.toFixed(2)} 为基准价快速生成本轮传导结果。
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div>
+                        <div className="mb-1 text-[11px] text-slate-400">基准价</div>
+                        <div className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm leading-10 text-slate-600">
+                          {MANUAL_LITHIUM_BASE_PRICE.toFixed(2)}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] text-slate-400">最新价格</label>
+                        <input
+                          className="h-10 w-32 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                          value={manualLithiumPrice}
+                          onChange={(event) => setManualLithiumPrice(event.target.value)}
+                          placeholder="例如 20.00"
+                        />
+                      </div>
+                      <Button onClick={handleGenerateManualLithiumAnalysis} disabled={manualGenerating} className="gap-1.5">
+                        {manualGenerating ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            生成中...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-3.5 w-3.5" />
+                            生成分析
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               ) : null}
 
-              <div className="w-fit rounded-lg bg-slate-100 p-1">
+	              <div className="w-fit rounded-lg bg-slate-100 p-1">
                 <button
                   onClick={() => setDetailTab('analyses')}
                   className={cn(
@@ -1935,10 +2204,17 @@ export function AgentStudio() {
                       <p className="text-sm font-medium">暂时还没有分析报告</p>
                       <p className="mt-1 text-xs">运行标的跟踪后会生成最新分析报告</p>
                     </div>
-                  ) : (
-                    analyses.map((analysis) => <AnalysisReport key={analysis.id} analysis={analysis} />)
-                  )
-                ) : (
+	                  ) : (
+	                    analyses.map((analysis) => (
+                        <AnalysisReport
+                          key={analysis.id}
+                          analysis={analysis}
+                          deleting={deletingAnalysisId === analysis.id}
+                          onDelete={handleDeleteAnalysis}
+                        />
+                      ))
+	                  )
+	                ) : (
                   <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                     <EventTimeline events={events} />
                   </div>

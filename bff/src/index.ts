@@ -29,7 +29,15 @@ const apiProxy = createProxyMiddleware({
 // Proxy non-AI routes to Java backend (before body parsing)
 app.use('/api', (req, res, next) => {
   const path = req.path;
-  if (path.startsWith('/ai/') || path.startsWith('/agent/') || path.startsWith('/research-agents/') || path.startsWith('/object-explorer/') || path.startsWith('/function-types') || path.startsWith('/neo4j/')) {
+  if (
+    path.startsWith('/ai/') ||
+    path.startsWith('/agent/') ||
+    path.startsWith('/research-agents/') ||
+    path.startsWith('/object-explorer/') ||
+    path.startsWith('/function-types') ||
+    path.startsWith('/neo4j/') ||
+    path.startsWith('/event-tracking/')
+  ) {
     return next();
   }
   return apiProxy(req, res, next);
@@ -45,6 +53,7 @@ import researchAgentRoutes from './routes/research-agents.js';
 import objectExplorerRoutes from './routes/object-explorer.js';
 import functionTypeRoutes from './routes/function-types.js';
 import neo4jRoutes from './routes/neo4j.js';
+import eventTrackingRoutes from './routes/event-tracking.js';
 import { initNeo4j, closeNeo4j } from './neo4j.js';
 
 // Body parsers only for AI routes
@@ -60,6 +69,8 @@ app.use('/api/function-types', express.json({ limit: '10mb' }));
 app.use('/api/function-types', functionTypeRoutes);
 app.use('/api/neo4j', express.json({ limit: '10mb' }));
 app.use('/api/neo4j', neo4jRoutes);
+app.use('/api/event-tracking', express.json({ limit: '10mb' }));
+app.use('/api/event-tracking', eventTrackingRoutes);
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Static Files (Frontend) ───────────────────────────────────────────────────

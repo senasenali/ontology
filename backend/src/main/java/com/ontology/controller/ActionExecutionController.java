@@ -193,11 +193,18 @@ public class ActionExecutionController {
         Map<String, Object> result = new HashMap<>();
         
         try {
+            String ruleCategory = rule.getRuleCategory();
+            Map<String, String> ruleParamDefaults = buildRuleParamDefaults(ruleParams);
+
+            if ("CREATE_LINK".equals(ruleCategory) || "DELETE_LINK".equals(ruleCategory)) {
+                return executeOntologyLinkRule(rule, parameters, ruleParamDefaults);
+            }
+
             // 从 interfaceUrl 中提取对象类型ID
             // URL格式: /api/instances/{objectTypeId}
             String url = rule.getInterfaceUrl();
             String objectTypeId = url.substring(url.lastIndexOf("/") + 1);
-            
+
             // 查询对象类型
             ObjectType objectType = objectTypeMapper.selectById(objectTypeId);
             if (objectType == null) {
@@ -205,11 +212,11 @@ public class ActionExecutionController {
                 result.put("error", "Object type not found: " + objectTypeId);
                 return result;
             }
-            
+
             String tableName = objectType.getBackingDataset();
             List<Property> properties = propertyMapper.selectByObjectTypeId(objectTypeId);
             List<OntologyRuleParam> inputParams = ontologyRuleParamMapper.selectInputParamsByRuleId(rule.getId());
-            
+
             // 构建属性映射
             Map<String, Property> propertyById = new HashMap<>();
             Map<String, Property> propertyByColumn = new HashMap<>();
@@ -221,11 +228,10 @@ public class ActionExecutionController {
                     propertyByColumn.put(prop.getBaseColumn(), prop);
                 }
             }
-            
+
             // 构建插入数据
             Map<String, Object> insertData = new HashMap<>();
-            Map<String, String> ruleParamDefaults = buildRuleParamDefaults(ruleParams);
-            
+
             // 优先按本体规则定义的入参消费本次请求；action_rule_params 仅作为默认值兜底
             if (inputParams != null && !inputParams.isEmpty()) {
                 for (OntologyRuleParam inputParam : inputParams) {
@@ -250,9 +256,9 @@ public class ActionExecutionController {
                 if (entry.getValue() == null) continue;
                 putOntologyInsertValueIfAbsent(insertData, entry.getKey(), entry.getValue(), propertyById, propertyByColumn);
             }
-            
+
             // 根据规则类别执行不同操作
-            if ("CREATE_OBJECT".equals(rule.getRuleCategory())) {
+            if ("CREATE_OBJECT".equals(ruleCategory)) {
                 // 创建实例
                 List<String> columns = new ArrayList<>();
                 List<String> placeholders = new ArrayList<>();
@@ -287,17 +293,17 @@ public class ActionExecutionController {
                 result.put("status", "success");
                 result.put("message", "Instance created successfully");
                 
-            } else if ("UPDATE_OBJECT".equals(rule.getRuleCategory())) {
+            } else if ("UPDATE_OBJECT".equals(ruleCategory)) {
                 // TODO: 实现更新逻辑
                 result.put("status", "success");
                 result.put("message", "Update not fully implemented");
-            } else if ("DELETE_OBJECT".equals(rule.getRuleCategory())) {
+            } else if ("DELETE_OBJECT".equals(ruleCategory)) {
                 // TODO: 实现删除逻辑
                 result.put("status", "success");
                 result.put("message", "Delete not fully implemented");
             } else {
-                result.put("status", "success");
-                result.put("message", "Rule category not supported: " + rule.getRuleCategory());
+                result.put("status", "failed");
+                result.put("error", "Rule category not supported: " + ruleCategory);
             }
             
         } catch (Exception e) {
@@ -472,6 +478,163 @@ public class ActionExecutionController {
             if (value != null) return value;
         }
         return normalizeExecutionValue(functionDefaultValue);
+    }
+
+    private Map<String, Object> executeOntologyLinkRule(
+            OntologyRule rule,
+            Map<String, Object> parameters,
+            Map<String, String> ruleParamDefaults) {
+        Map<String, Object> result = new HashMap<>();
+
+        String linkTypeId = firstNonBlank(
+                stringValue(parameters.get("linkTypeId")),
+                stringValue(ruleParamDefaults.get("linkTypeId")),
+                extractTailSegment(rule.getInterfaceUrl())
+        );
+        String sourceInstanceId = firstNonBlank(
+                stringValue(parameters.get("sourceInstanceId")),
+                stringValue(ruleParamDefaults.get("sourceInstanceId"))
+        );
+        String targetInstanceId = firstNonBlank(
+                stringValue(parameters.get("targetInstanceId")),
+                stringValue(ruleParamDefaults.get("targetInstanceId"))
+        );
+
+        if (linkTypeId == null || sourceInstanceId == null || targetInstanceId == null) {
+            result.put("status", "failed");
+            result.put("error", "linkTypeId, sourceInstanceId and targetInstanceId are required");
+            return result;
+        }
+
+        Map<String, Object> linkType = fetchLinkTypeMeta(linkTypeId);
+        if (linkType == null) {
+            result.put("status", "failed");
+            result.put("error", "Link type not found: " + linkTypeId);
+            return result;
+        }
+
+        String sourceTable = stringValue(linkType.get("source_table"));
+        String targetTable = stringValue(linkType.get("target_table"));
+        String sourceColumn = stringValue(linkType.get("source_column"));
+        String targetColumn = stringValue(linkType.get("target_column"));
+        boolean sameTypeRelation = Objects.equals(linkType.get("source_object_id"), linkType.get("target_object_id"));
+
+        validateLinkEndpointExists(sourceTable, sourceColumn, sourceInstanceId, "Source instance not found");
+        validateLinkEndpointExists(targetTable, targetColumn, targetInstanceId, "Target instance not found");
+
+        if ("CREATE_LINK".equals(rule.getRuleCategory())) {
+            Map<String, Object> existingLink = findExistingLink(linkTypeId, sourceInstanceId, targetInstanceId, sameTypeRelation);
+            if (existingLink == null) {
+                jdbcTemplate.update(
+                        "INSERT INTO link_instance_data (link_type_id, source_instance_id, target_instance_id, created_at) VALUES (?, ?, ?, ?)",
+                        linkTypeId,
+                        sourceInstanceId,
+                        targetInstanceId,
+                        LocalDateTime.now()
+                );
+            }
+
+            result.put("status", "success");
+            result.put("message", existingLink == null ? "Link created successfully" : "Link already exists");
+            result.put("linkExists", true);
+            result.put("data", Map.of(
+                    "linkTypeId", linkTypeId,
+                    "sourceInstanceId", sourceInstanceId,
+                    "targetInstanceId", targetInstanceId
+            ));
+            return result;
+        }
+
+        if ("DELETE_LINK".equals(rule.getRuleCategory())) {
+            Map<String, Object> existingLink = findExistingLink(linkTypeId, sourceInstanceId, targetInstanceId, sameTypeRelation);
+            if (existingLink != null) {
+                jdbcTemplate.update("DELETE FROM link_instance_data WHERE id = ?", existingLink.get("id"));
+            }
+
+            result.put("status", "success");
+            result.put("message", existingLink == null ? "Link not found" : "Link deleted successfully");
+            result.put("linkExists", false);
+            result.put("data", Map.of(
+                    "linkTypeId", linkTypeId,
+                    "sourceInstanceId", sourceInstanceId,
+                    "targetInstanceId", targetInstanceId
+            ));
+            return result;
+        }
+
+        result.put("status", "failed");
+        result.put("error", "Unsupported ontology link rule: " + rule.getRuleCategory());
+        return result;
+    }
+
+    private Map<String, Object> fetchLinkTypeMeta(String linkTypeId) {
+        String sql = """
+                SELECT lt.id, lt.name, lt.source_object_id, lt.target_object_id,
+                       lt.source_column, lt.target_column,
+                       sot.backing_dataset AS source_table,
+                       tot.backing_dataset AS target_table
+                FROM link_types lt
+                JOIN object_types sot ON sot.id = lt.source_object_id
+                JOIN object_types tot ON tot.id = lt.target_object_id
+                WHERE lt.id = ?
+                LIMIT 1
+                """;
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, linkTypeId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private void validateLinkEndpointExists(String tableName, String columnName, String instanceId, String errorMessage) {
+        Integer count = jdbcTemplate.queryForObject(
+                String.format("SELECT COUNT(*) FROM `%s` WHERE `%s` = ?", tableName, columnName),
+                Integer.class,
+                instanceId
+        );
+        if (count == null || count == 0) {
+            throw new RuntimeException(errorMessage + ": " + instanceId);
+        }
+    }
+
+    private Map<String, Object> findExistingLink(String linkTypeId, String sourceInstanceId, String targetInstanceId, boolean sameTypeRelation) {
+        String sql = """
+                SELECT * FROM link_instance_data
+                WHERE link_type_id = ?
+                  AND (
+                    (source_instance_id = ? AND target_instance_id = ?)
+                    OR (? = 1 AND source_instance_id = ? AND target_instance_id = ?)
+                  )
+                ORDER BY id ASC
+                LIMIT 1
+                """;
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                sql,
+                linkTypeId,
+                sourceInstanceId,
+                targetInstanceId,
+                sameTypeRelation,
+                targetInstanceId,
+                sourceInstanceId
+        );
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private String extractTailSegment(String value) {
+        String normalized = stringValue(value);
+        if (normalized == null || !normalized.contains("/")) return normalized;
+        return normalized.substring(normalized.lastIndexOf("/") + 1);
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) return null;
+        for (String value : values) {
+            String normalized = stringValue(value);
+            if (normalized != null) return normalized;
+        }
+        return null;
+    }
+
+    private String stringValue(Object value) {
+        Object normalized = normalizeExecutionValue(value);
+        return normalized == null ? null : String.valueOf(normalized);
     }
 
     private Object normalizeExecutionValue(Object value) {

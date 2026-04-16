@@ -20,6 +20,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class ResearchAgentController {
+
+    private static final String LITHIUM_DEMO_AGENT_ID = "demo_agent_lithium";
     
     private final AgentMapper agentMapper;
     private final AgentEventMapper agentEventMapper;
@@ -143,6 +145,10 @@ public class ResearchAgentController {
     
     @PostMapping("/{id}/analyses")
     public Map<String, Object> createAnalysis(@PathVariable String id, @RequestBody Map<String, Object> data) {
+        if (LITHIUM_DEMO_AGENT_ID.equals(id)) {
+            agentAnalysisMapper.deleteByAgentId(id);
+        }
+
         AgentAnalysis analysis = new AgentAnalysis();
         analysis.setId((String) data.get("id"));
         analysis.setAgentId(id);
@@ -156,5 +162,16 @@ public class ResearchAgentController {
         
         agentAnalysisMapper.insert(analysis);
         return Map.of("success", true, "analysis", analysis);
+    }
+
+    @DeleteMapping("/{id}/analyses/{analysisId}")
+    public Map<String, Object> deleteAnalysis(@PathVariable String id, @PathVariable String analysisId) {
+        AgentAnalysis analysis = agentAnalysisMapper.selectById(analysisId);
+        if (analysis == null || !id.equals(analysis.getAgentId())) {
+            throw new RuntimeException("Analysis not found");
+        }
+
+        agentAnalysisMapper.deleteById(analysisId);
+        return Map.of("success", true);
     }
 }

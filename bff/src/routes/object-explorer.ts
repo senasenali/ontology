@@ -3,6 +3,11 @@ import { pool } from '../db.js';
 
 const router = Router();
 
+function buildLinkKey(a: string, b: string, linkTypeId: string, isSameType: boolean) {
+  if (!isSameType) return `${a}:${b}:${linkTypeId}`;
+  return [a, b].sort().join(':') + `:${linkTypeId}`;
+}
+
 // 获取对象类型的实例数据
 router.get('/:objectTypeId/instances', async (req, res) => {
   const { objectTypeId } = req.params;
@@ -212,26 +217,31 @@ router.get('/:objectTypeId/instances/:instanceId/graph', async (req, res) => {
       
       for (const linkType of linkTypeRows) {
         const isSource = linkType.source_object_id === currentObjectTypeId;
+        const isSameType = linkType.source_object_id === linkType.target_object_id;
         const relatedObjectTypeId = isSource ? linkType.target_object_id : linkType.source_object_id;
-        const relatedColumnName = isSource ? linkType.target_column : linkType.source_column;
-        const currentColumnName = isSource ? linkType.source_column : linkType.target_column;
-        const relatedTable = isSource ? linkType.target_table : linkType.source_table;
-        const relatedName = isSource ? linkType.target_name : linkType.source_name;
         
-        // 从link_instance_data查找关联实例
+        // 同类型关系按无向关系解释，便于双向浏览
         const [linkInstanceRows]: any = await connection.execute(
-          `SELECT * FROM link_instance_data WHERE link_type_id = ? AND ${
-            isSource ? 'source_instance_id' : 'target_instance_id'
-          } = ?`,
-          [linkType.id, currentInstanceId]
+          isSameType
+            ? `SELECT * FROM link_instance_data
+               WHERE link_type_id = ?
+                 AND (source_instance_id = ? OR target_instance_id = ?)`
+            : `SELECT * FROM link_instance_data WHERE link_type_id = ? AND ${
+                isSource ? 'source_instance_id' : 'target_instance_id'
+              } = ?`,
+          isSameType ? [linkType.id, currentInstanceId, currentInstanceId] : [linkType.id, currentInstanceId]
         );
         
         for (const linkInstance of linkInstanceRows) {
-          const relatedInstanceId = isSource ? linkInstance.target_instance_id : linkInstance.source_instance_id;
+          const relatedInstanceId = isSameType
+            ? (linkInstance.source_instance_id === currentInstanceId
+                ? linkInstance.target_instance_id
+                : linkInstance.source_instance_id)
+            : (isSource ? linkInstance.target_instance_id : linkInstance.source_instance_id);
           const relatedNodeKey = `${relatedObjectTypeId}:${relatedInstanceId}`;
           
           // 添加链接
-          const linkKey = `${nodeKey}:${relatedNodeKey}:${linkType.id}`;
+          const linkKey = buildLinkKey(nodeKey, relatedNodeKey, linkType.id, isSameType);
           if (!visitedLinks.has(linkKey)) {
             visitedLinks.add(linkKey);
             links.push({

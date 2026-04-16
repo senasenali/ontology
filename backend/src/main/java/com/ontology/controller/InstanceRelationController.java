@@ -20,6 +20,15 @@ public class InstanceRelationController {
     private final PropertyMapper propertyMapper;
     private final JdbcTemplate jdbcTemplate;
 
+    private String buildLinkKey(String nodeKey, String relatedNodeKey, String linkTypeId, boolean sameTypeRelation) {
+        if (!sameTypeRelation) {
+            return nodeKey + ":" + relatedNodeKey + ":" + linkTypeId;
+        }
+        List<String> parts = Arrays.asList(nodeKey, relatedNodeKey);
+        parts.sort(String::compareTo);
+        return String.join(":", parts) + ":" + linkTypeId;
+    }
+
     /**
      * 查询实例关系图谱
      * GET /api/instances/{objectTypeId}/{instanceId}/relations
@@ -150,24 +159,37 @@ public class InstanceRelationController {
             String linkTypeId = (String) linkType.get("id");
             
             boolean isSource = currentObjectTypeId.equals(sourceObjectId);
+            boolean sameTypeRelation = Objects.equals(sourceObjectId, targetObjectId);
             String relatedObjectTypeId = isSource ? targetObjectId : sourceObjectId;
             
-            // 查询 link_instance_data
-            String linkInstanceSql = String.format(
-                    "SELECT * FROM link_instance_data WHERE link_type_id = ? AND %s = ?",
-                    isSource ? "source_instance_id" : "target_instance_id"
-            );
-            
-            List<Map<String, Object>> linkInstances = jdbcTemplate.queryForList(linkInstanceSql, linkTypeId, currentInstanceId);
+            List<Map<String, Object>> linkInstances;
+            if (sameTypeRelation) {
+                linkInstances = jdbcTemplate.queryForList(
+                        "SELECT * FROM link_instance_data WHERE link_type_id = ? AND (source_instance_id = ? OR target_instance_id = ?)",
+                        linkTypeId,
+                        currentInstanceId,
+                        currentInstanceId
+                );
+            } else {
+                String linkInstanceSql = String.format(
+                        "SELECT * FROM link_instance_data WHERE link_type_id = ? AND %s = ?",
+                        isSource ? "source_instance_id" : "target_instance_id"
+                );
+                linkInstances = jdbcTemplate.queryForList(linkInstanceSql, linkTypeId, currentInstanceId);
+            }
             
             for (Map<String, Object> linkInstance : linkInstances) {
-                String relatedInstanceId = isSource ? 
-                        (String) linkInstance.get("target_instance_id") : 
-                        (String) linkInstance.get("source_instance_id");
+                String relatedInstanceId = sameTypeRelation
+                        ? (currentInstanceId.equals(linkInstance.get("source_instance_id"))
+                            ? (String) linkInstance.get("target_instance_id")
+                            : (String) linkInstance.get("source_instance_id"))
+                        : (isSource
+                            ? (String) linkInstance.get("target_instance_id")
+                            : (String) linkInstance.get("source_instance_id"));
                 String relatedNodeKey = relatedObjectTypeId + ":" + relatedInstanceId;
                 
                 // 添加链接
-                String linkKey = nodeKey + ":" + relatedNodeKey + ":" + linkTypeId;
+                String linkKey = buildLinkKey(nodeKey, relatedNodeKey, linkTypeId, sameTypeRelation);
                 if (!visitedLinks.contains(linkKey)) {
                     visitedLinks.add(linkKey);
                     

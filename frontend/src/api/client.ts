@@ -290,6 +290,52 @@ export const api = {
   getAgentAnalyses: (id: string) =>
     request<{ analyses: any[] }>(`/research-agents/${id}/analyses`),
 
+  deleteAgentAnalysis: (agentId: string, analysisId: string) =>
+    request<{ success: boolean }>(`/research-agents/${agentId}/analyses/${analysisId}`, {
+      method: 'DELETE',
+    }),
+
+  createManualLithiumAnalysis: (agentId: string, data: {
+    latestPrice: number;
+    previousPrice?: number;
+    depth?: number;
+  }) =>
+    request<{ success: boolean; analysis: any }>(`/research-agents/${agentId}/manual-price-analysis`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  calculateObjectTypePriceTransmission: (data: {
+    objectTypeId: string;
+    priceChangePercent: number;
+    previousPrice?: number;
+    latestPrice?: number;
+    depth?: number;
+  }) =>
+    request<{ success: boolean; data: any; error?: string }>('/analysis/price-transmission/object-type', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // ── Event Tracking ────────────────────────────────────────────────────────
+  getTrackedEvents: () =>
+    request<{ success: boolean; events: any[] }>('/event-tracking/events'),
+
+  analyzeTrackedEvent: (id: string) =>
+    request<{ success: boolean; candidate: any | null }>(`/event-tracking/events/${id}/analyze`, {
+      method: 'POST',
+    }),
+
+  createEventCandidateLink: (id: string) =>
+    request<{ success: boolean; result: any }>(`/event-tracking/candidates/${id}/create-link`, {
+      method: 'POST',
+    }),
+
+  deleteEventCandidateLink: (id: string) =>
+    request<{ success: boolean; result: any }>(`/event-tracking/candidates/${id}/delete-link`, {
+      method: 'POST',
+    }),
+
   // ── Datasets ────────────────────────────────────────────────────────────────
   getDatasetColumns: (datasetName: string) =>
     request<{ success: boolean; data: Array<{
