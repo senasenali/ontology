@@ -1909,17 +1909,18 @@ export function AgentStudio() {
 
     setManualGenerating(true);
     try {
-      const result = await api.createManualLithiumAnalysis(DEMO_LITHIUM_AGENT_ID, {
+      await api.createManualLithiumAnalysis(DEMO_LITHIUM_AGENT_ID, {
         previousPrice: MANUAL_LITHIUM_BASE_PRICE,
         latestPrice,
         depth: 4,
       });
 
-      const analysis = mapBackendAnalysis(result.analysis);
-      analysis.isTemporary = false;
+      const analysesResult = await api.getAgentAnalyses(DEMO_LITHIUM_AGENT_ID);
+      const nextAnalyses = (analysesResult.analyses || []).map(mapBackendAnalysis);
+
       setAnalysesByAgent((prev) => ({
         ...prev,
-        [DEMO_LITHIUM_AGENT_ID]: [analysis, ...(prev[DEMO_LITHIUM_AGENT_ID] || [])],
+        [DEMO_LITHIUM_AGENT_ID]: nextAnalyses,
       }));
       toast.success('价格传导分析已生成');
     } catch (error: any) {
