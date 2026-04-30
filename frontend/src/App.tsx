@@ -7,6 +7,7 @@ import { LinkTypes } from './pages/LinkTypes';
 import { ActionTypes } from './pages/ActionTypes';
 import { FunctionTypes } from './pages/FunctionTypes';
 import { GraphView } from './pages/GraphView';
+import { Interfaces } from './pages/Interfaces';
 import { Settings } from './pages/Settings';
 import { AiStudio } from './pages/AiStudio';
 import { AgentStudio } from './pages/AgentStudio';
@@ -22,6 +23,7 @@ export const ROUTES = {
   dashboard: '/',
   graph: '/graph',
   objects: '/objects',
+  interfaces: '/interfaces',
   explorer: '/explorer',
   links: '/links',
   actions: '/actions',
@@ -36,6 +38,7 @@ const PATH_TO_TAB: Record<string, string> = {
   '/': 'dashboard',
   '/graph': 'graph',
   '/objects': 'objects',
+  '/interfaces': 'interfaces',
   '/explorer': 'explorer',
   '/links': 'links',
   '/actions': 'actions',
@@ -94,7 +97,7 @@ function PageWrapper({
 function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [ontology, setOntology] = useState<OntologyData>({ objectTypes: [], linkTypes: [], actionTypes: [] });
+  const [ontology, setOntology] = useState<OntologyData>({ objectTypes: [], linkTypes: [], actionTypes: [], interfaces: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -102,7 +105,12 @@ function AppContent() {
 
   useEffect(() => {
     api.getOntology()
-      .then(data => setOntology(data))
+      .then(data => setOntology({
+        objectTypes: data.objectTypes || [],
+        linkTypes: data.linkTypes || [],
+        actionTypes: data.actionTypes || [],
+        interfaces: data.interfaces || [],
+      }))
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
@@ -130,6 +138,11 @@ function AppContent() {
         <Route path="/objects" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
             <ObjectTypes data={ontology} onUpdate={setOntology} />
+          </PageWrapper>
+        } />
+        <Route path="/interfaces" element={
+          <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
+            <Interfaces data={ontology} onUpdate={setOntology} />
           </PageWrapper>
         } />
         <Route path="/explorer" element={

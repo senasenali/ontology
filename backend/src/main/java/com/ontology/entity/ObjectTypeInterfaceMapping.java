@@ -10,40 +10,37 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
-@TableName("ontology_rules")
-public class OntologyRule {
-    
+@TableName("object_type_interfaces_mapping")
+public class ObjectTypeInterfaceMapping {
+
     @TableId(type = IdType.INPUT)
     private String id;
-    
-    private String ruleCategory;
-    
-    private String functionName;
-    
-    private String interfaceType;
-    
-    private String requestMethod;
-    
-    private String interfaceUrl;
-    
-    private String functionDescription;
-    
+
+    private String objectTypeId;
+
+    private String interfaceId;
+
+    private String status;
+
     private LocalDateTime createdAt;
-    
+
     private LocalDateTime updatedAt;
-    
-    @TableField(exist = false)
-    private List<OntologyRuleParam> inputParams;
-    
-    @TableField(exist = false)
-    private List<OntologyRuleParam> outputParams;
 
     @TableField(exist = false)
-    private String relatedEntityType;
+    private String objectTypeName;
 
     @TableField(exist = false)
-    private String relatedEntityId;
+    private String interfaceName;
 
     @TableField(exist = false)
-    private String relatedEntityName;
+    private String interfaceDescription;
+
+    @TableField(exist = false)
+    private List<InterfaceProperty> interfaceProperties;
+
+    @TableField(exist = false)
+    private List<InterfacePropertyMapping> propertyMappings;
+
+    @TableField(exist = false)
+    private Boolean mappingComplete;
 }

@@ -19,6 +19,7 @@ public class OntologyService {
     private final ActionRuleMapper actionRuleMapper;
     private final ActionEffectMapper actionEffectMapper;
     private final IndustryCategoryMapper industryCategoryMapper;
+    private final InterfaceService interfaceService;
     
     public Map<String, Object> buildOntologyData() {
         Map<String, Object> result = new HashMap<>();
@@ -27,6 +28,7 @@ public class OntologyService {
         List<ObjectType> objectTypes = objectTypeMapper.selectAllOrdered();
         for (ObjectType ot : objectTypes) {
             ot.setProperties(propertyMapper.selectByObjectTypeId(ot.getId()));
+            ot.setImplementedInterfaces(interfaceService.listObjectTypeInterfaceMappings(ot.getId()));
         }
         result.put("objectTypes", objectTypes);
         
@@ -41,6 +43,9 @@ public class OntologyService {
             at.setEffects(actionEffectMapper.selectByActionTypeId(at.getId()));
         }
         result.put("actionTypes", actionTypes);
+
+        // Interfaces
+        result.put("interfaces", interfaceService.listOntologyInterfaces());
         
         return result;
     }
@@ -145,6 +150,7 @@ public class OntologyService {
         result.put("objectTypes", otResult);
         result.put("linkTypes", linkTypes);
         result.put("actionTypes", atResult);
+        result.put("interfaces", interfaceService.listOntologyInterfacesByIndustry(descendantIds));
         
         return result;
     }

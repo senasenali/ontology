@@ -5,11 +5,16 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ontology.entity.LinkType;
 import com.ontology.entity.ObjectType;
+import com.ontology.entity.ObjectTypeInterfaceMapping;
+import com.ontology.entity.OntologyInterface;
 import com.ontology.entity.Property;
+import com.ontology.mapper.InterfaceMapper;
 import com.ontology.mapper.LinkTypeMapper;
 import com.ontology.mapper.ObjectTypeMapper;
 import com.ontology.mapper.PropertyMapper;
+import com.ontology.service.InterfaceService;
 import com.ontology.service.OntologyService;
+import com.ontology.service.RuleTemplateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,7 +31,10 @@ public class ReviewController {
     private final ObjectTypeMapper objectTypeMapper;
     private final LinkTypeMapper linkTypeMapper;
     private final PropertyMapper propertyMapper;
+    private final InterfaceMapper interfaceMapper;
+    private final InterfaceService interfaceService;
     private final OntologyService ontologyService;
+    private final RuleTemplateService ruleTemplateService;
 
     /**
      * 获取待审核列表（分页）
@@ -47,7 +55,13 @@ public class ReviewController {
         QueryWrapper<LinkType> ltWrapper = new QueryWrapper<>();
         ltWrapper.eq("status", "pending").orderByDesc("created_at");
         IPage<LinkType> ltPage = linkTypeMapper.selectPage(new Page<>(page, pageSize), ltWrapper);
-        
+
+        QueryWrapper<OntologyInterface> interfaceWrapper = new QueryWrapper<>();
+        interfaceWrapper.eq("status", "pending").orderByDesc("created_at");
+        IPage<OntologyInterface> interfacePage = interfaceMapper.selectPage(new Page<>(page, pageSize), interfaceWrapper);
+
+        List<ObjectTypeInterfaceMapping> objectTypeInterfaceMappings = interfaceService.listPendingObjectTypeInterfaceMappings();
+
         // 统计总数
         Long totalObjectTypes = objectTypeMapper.selectCount(
             new QueryWrapper<ObjectType>().eq("status", "pending")
@@ -55,12 +69,20 @@ public class ReviewController {
         Long totalLinkTypes = linkTypeMapper.selectCount(
             new QueryWrapper<LinkType>().eq("status", "pending")
         );
+        Long totalInterfaces = interfaceMapper.selectCount(
+            new QueryWrapper<OntologyInterface>().eq("status", "pending")
+        );
+        int totalObjectTypeInterfaceMappings = objectTypeInterfaceMappings.size();
         
         result.put("objectTypes", otPage.getRecords());
         result.put("linkTypes", ltPage.getRecords());
+        result.put("interfaces", interfacePage.getRecords());
+        result.put("objectTypeInterfaceMappings", objectTypeInterfaceMappings);
         result.put("totalObjectTypes", totalObjectTypes);
         result.put("totalLinkTypes", totalLinkTypes);
-        result.put("total", totalObjectTypes + totalLinkTypes);
+        result.put("totalInterfaces", totalInterfaces);
+        result.put("totalObjectTypeInterfaceMappings", totalObjectTypeInterfaceMappings);
+        result.put("total", totalObjectTypes + totalLinkTypes + totalInterfaces + totalObjectTypeInterfaceMappings);
         result.put("page", page);
         result.put("pageSize", pageSize);
         
@@ -82,6 +104,7 @@ public class ReviewController {
         
         objectType.setStatus("active");
         objectTypeMapper.updateById(objectType);
+        ruleTemplateService.ensureObjectTypeRules(objectType);
         
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
@@ -107,6 +130,9 @@ public class ReviewController {
         QueryWrapper<Property> propWrapper = new QueryWrapper<>();
         propWrapper.eq("object_type_id", id);
         propertyMapper.delete(propWrapper);
+
+        // 删除历史上可能已提前生成的动作类型和本体规则
+        ruleTemplateService.deleteObjectTypeRuleArtifacts(id);
         
         // 删除对象类型
         objectTypeMapper.deleteById(id);
@@ -133,6 +159,7 @@ public class ReviewController {
         
         linkType.setStatus("active");
         linkTypeMapper.updateById(linkType);
+        ruleTemplateService.ensureLinkTypeRules(linkType);
         
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
@@ -154,12 +181,55 @@ public class ReviewController {
             return result;
         }
         
+        // 删除历史上可能已提前生成的动作类型和本体规则
+        ruleTemplateService.deleteLinkTypeRuleArtifacts(id);
+
         // 删除链接类型
         linkTypeMapper.deleteById(id);
         
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
         result.put("message", "链接类型已删除");
+        result.put("data", ontologyService.buildOntologyData());
+        return result;
+    }
+
+    @PostMapping("/interfaces/{id}/approve")
+    public Map<String, Object> approveInterface(@PathVariable String id) {
+        interfaceService.approveInterface(id);
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("message", "Interface 审核通过");
+        result.put("data", ontologyService.buildOntologyData());
+        return result;
+    }
+
+    @PostMapping("/interfaces/{id}/reject")
+    public Map<String, Object> rejectInterface(@PathVariable String id) {
+        interfaceService.rejectInterface(id);
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("message", "Interface 已删除");
+        result.put("data", ontologyService.buildOntologyData());
+        return result;
+    }
+
+    @PostMapping("/object-type-interface-mappings/{id}/approve")
+    public Map<String, Object> approveObjectTypeInterfaceMapping(@PathVariable String id) {
+        interfaceService.approveObjectTypeInterfaceMapping(id);
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("message", "实现关系审核通过");
+        result.put("data", ontologyService.buildOntologyData());
+        return result;
+    }
+
+    @PostMapping("/object-type-interface-mappings/{id}/reject")
+    public Map<String, Object> rejectObjectTypeInterfaceMapping(@PathVariable String id) {
+        interfaceService.rejectObjectTypeInterfaceMapping(id);
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("message", "实现关系已删除");
         result.put("data", ontologyService.buildOntologyData());
         return result;
     }
@@ -175,11 +245,17 @@ public class ReviewController {
         Long linkTypes = linkTypeMapper.selectCount(
             new QueryWrapper<LinkType>().eq("status", "pending")
         );
+        Long interfaces = interfaceMapper.selectCount(
+            new QueryWrapper<OntologyInterface>().eq("status", "pending")
+        );
+        int objectTypeInterfaceMappings = interfaceService.listPendingObjectTypeInterfaceMappings().size();
         
         Map<String, Object> result = new HashMap<>();
-        result.put("total", objectTypes + linkTypes);
+        result.put("total", objectTypes + linkTypes + interfaces + objectTypeInterfaceMappings);
         result.put("objectTypes", objectTypes);
         result.put("linkTypes", linkTypes);
+        result.put("interfaces", interfaces);
+        result.put("objectTypeInterfaceMappings", objectTypeInterfaceMappings);
         return result;
     }
 }

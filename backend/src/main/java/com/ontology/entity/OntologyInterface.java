@@ -10,31 +10,39 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
-@TableName("object_types")
-public class ObjectType {
-    
+@TableName("interfaces")
+public class OntologyInterface {
+
     @TableId(type = IdType.INPUT)
     private String id;
-    
+
     private String name;
-    
+
     private String description;
-    
-    private String icon;
-    
-    private String backingDataset;
-    
+
     private String industryId;
-    
-    private LocalDateTime createdAt;
-    
-    private LocalDateTime updatedAt;
 
     private String status;
 
-    @TableField(exist = false)
-    private List<Property> properties;
+    private LocalDateTime createdAt;
+
+    private LocalDateTime updatedAt;
 
     @TableField(exist = false)
-    private List<ObjectTypeInterfaceMapping> implementedInterfaces;
+    private String parentInterfaceId;
+
+    @TableField(exist = false)
+    private String parentInterfaceName;
+
+    @TableField(exist = false)
+    private List<OntologyInterface> childInterfaces;
+
+    @TableField(exist = false)
+    private List<InterfaceProperty> properties;
+
+    @TableField(exist = false)
+    private List<InterfaceLinkConstraint> linkTypeConstraints;
+
+    @TableField(exist = false)
+    private List<ObjectTypeInterfaceMapping> implementedObjectTypes;
 }

@@ -7,34 +7,43 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 @Data
-@TableName("object_types")
-public class ObjectType {
-    
+@TableName("interface_link_constraints")
+public class InterfaceLinkConstraint {
+
     @TableId(type = IdType.INPUT)
     private String id;
-    
+
+    private String interfaceId;
+
     private String name;
-    
-    private String description;
-    
-    private String icon;
-    
-    private String backingDataset;
-    
-    private String industryId;
-    
-    private LocalDateTime createdAt;
-    
-    private LocalDateTime updatedAt;
+
+    private String targetType;
+
+    private String targetInterfaceId;
+
+    private String targetObjectTypeId;
+
+    private String cardinality;
+
+    private Integer required;
 
     private String status;
 
-    @TableField(exist = false)
-    private List<Property> properties;
+    private LocalDateTime createdAt;
+
+    private LocalDateTime updatedAt;
 
     @TableField(exist = false)
-    private List<ObjectTypeInterfaceMapping> implementedInterfaces;
+    private Boolean inherited;
+
+    @TableField(exist = false)
+    private String sourceInterfaceId;
+
+    @TableField(exist = false)
+    private String sourceInterfaceName;
+
+    @TableField(exist = false)
+    private String targetName;
 }

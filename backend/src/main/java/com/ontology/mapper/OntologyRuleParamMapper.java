@@ -23,4 +23,11 @@ public interface OntologyRuleParamMapper extends BaseMapper<OntologyRuleParam> {
     
     @Delete("DELETE FROM ontology_rule_params WHERE rule_id = #{ruleId}")
     int deleteByRuleId(@Param("ruleId") String ruleId);
+
+    @Delete("""
+            DELETE p FROM ontology_rule_params p
+            LEFT JOIN ontology_rules r ON r.id = p.rule_id
+            WHERE r.id IS NULL
+            """)
+    int deleteOrphanParams();
 }

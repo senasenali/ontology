@@ -19,6 +19,7 @@ export interface ObjectType {
   industryId?: string | null;
   properties: Property[];
   status?: string;
+  implementedInterfaces?: ObjectTypeImplementedInterface[];
 }
 
 export type Cardinality = "1:1" | "1:N" | "N:M" | "N:1";
@@ -63,10 +64,77 @@ export interface IndustryCategory {
   children?: IndustryCategory[];
 }
 
+export interface InterfaceProperty {
+  id: string;
+  interfaceId: string;
+  name: string;
+  type: PropertyType;
+  description?: string;
+  required?: number;
+  sortOrder?: number;
+  inherited?: boolean;
+  sourceInterfaceId?: string;
+  sourceInterfaceName?: string;
+}
+
+export interface InterfaceLinkTypeConstraint {
+  id: string;
+  interfaceId: string;
+  name: string;
+  targetType: "interface" | "object_type";
+  targetInterfaceId?: string | null;
+  targetObjectTypeId?: string | null;
+  cardinality: "1:1" | "1:N";
+  required?: number;
+  status?: string;
+  inherited?: boolean;
+  sourceInterfaceId?: string;
+  sourceInterfaceName?: string;
+  targetName?: string;
+}
+
+export interface OntologyInterface {
+  id: string;
+  name: string;
+  description?: string;
+  industryId?: string | null;
+  status?: string;
+  parentInterfaceId?: string | null;
+  parentInterfaceName?: string | null;
+  childInterfaces?: Array<Pick<OntologyInterface, "id" | "name" | "status">>;
+  properties: InterfaceProperty[];
+  linkTypeConstraints: InterfaceLinkTypeConstraint[];
+  implementedObjectTypes?: ObjectTypeImplementedInterface[];
+}
+
+export interface InterfacePropertyMapping {
+  id: string;
+  objectTypeInterfaceMappingId?: string;
+  interfacePropertyId: string;
+  propertyId: string;
+  interfacePropertyName?: string;
+  interfacePropertyRequired?: number;
+  propertyName?: string;
+}
+
+export interface ObjectTypeImplementedInterface {
+  id: string;
+  objectTypeId: string;
+  objectTypeName?: string;
+  interfaceId: string;
+  status?: string;
+  interfaceName?: string;
+  interfaceDescription?: string;
+  interfaceProperties?: InterfaceProperty[];
+  propertyMappings?: InterfacePropertyMapping[];
+  mappingComplete?: boolean;
+}
+
 export interface OntologyData {
   objectTypes: ObjectType[];
   linkTypes: LinkType[];
   actionTypes: ActionType[];
+  interfaces: OntologyInterface[];
 }
 
 export const mockOntology: OntologyData = {
@@ -202,5 +270,6 @@ export const mockOntology: OntologyData = {
         { id: "r4", type: "webhook", description: "Notify maintenance team via email" }
       ]
     }
-  ]
+  ],
+  interfaces: []
 };

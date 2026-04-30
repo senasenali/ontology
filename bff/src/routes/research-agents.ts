@@ -76,7 +76,7 @@ function buildLithiumFallbackAnalysis(
     content: `碳酸锂最新价格由 ${previousPrice.toFixed(2)} 变为 ${latestPrice.toFixed(2)}，单次波动 ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%。本轮价格冲击首先传导至${uniqueTypeNames(firstLayer) || '一阶材料环节'}，随后继续扩散到${uniqueTypeNames(secondLayer) || '二阶制造环节'}。当前更需要观察的是中游提价速度与终端利润消化能力是否匹配本轮成本变化。`,
     key_findings: [
       `碳酸锂价格单次波动达到 ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%，已超过 5% 触发阈值。`,
-      `一阶受影响环节集中在${uniqueTypeNames(firstLayer) || '材料环节'}，对象类型层传导已清晰覆盖关键中游节点。`,
+      `一阶受影响环节集中在${uniqueTypeNames(firstLayer) || '材料环节'}，概念层传导已清晰覆盖关键中游节点。`,
       `二阶传导已覆盖${uniqueTypeNames(secondLayer) || '制造环节'}，说明成本冲击正在进一步向下游扩散。`,
     ],
     recommendation: '继续跟踪电解液、电芯与动力电池的跟涨幅度，判断成本压力会更多由中游吸收还是继续向终端传导。',
@@ -269,7 +269,7 @@ router.post('/:id/manual-price-analysis', async (req, res) => {
     }
 
     const latestPrice = Number(req.body?.latestPrice);
-    const previousPrice = Number(req.body?.previousPrice ?? 12.5);
+    const previousPrice = Number(req.body?.previousPrice ?? 12.55);
     const depth = Number(req.body?.depth ?? 4);
 
     if (!Number.isFinite(latestPrice) || latestPrice <= 0) {

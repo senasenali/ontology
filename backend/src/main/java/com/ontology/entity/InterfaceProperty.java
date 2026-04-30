@@ -6,35 +6,31 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.time.LocalDateTime;
-import java.util.List;
-
 @Data
-@TableName("object_types")
-public class ObjectType {
-    
+@TableName("interface_properties")
+public class InterfaceProperty {
+
     @TableId(type = IdType.INPUT)
     private String id;
-    
+
+    private String interfaceId;
+
     private String name;
-    
+
+    private String type;
+
     private String description;
-    
-    private String icon;
-    
-    private String backingDataset;
-    
-    private String industryId;
-    
-    private LocalDateTime createdAt;
-    
-    private LocalDateTime updatedAt;
 
-    private String status;
+    private Integer required;
+
+    private Integer sortOrder;
 
     @TableField(exist = false)
-    private List<Property> properties;
+    private Boolean inherited;
 
     @TableField(exist = false)
-    private List<ObjectTypeInterfaceMapping> implementedInterfaces;
+    private String sourceInterfaceId;
+
+    @TableField(exist = false)
+    private String sourceInterfaceName;
 }

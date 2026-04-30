@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Database, Link as LinkIcon, Network, Settings, Search, Bell, UserCircle, PlayCircle, Save, CheckCircle2, Sparkles, Bot, Building2, Compass, Code, ChevronDown, ChevronRight, Shield } from 'lucide-react';
+import { LayoutDashboard, Database, Boxes, Link as LinkIcon, Network, Settings, Search, Bell, UserCircle, PlayCircle, Save, CheckCircle2, Sparkles, Bot, Building2, Compass, Code, ChevronDown, ChevronRight, Shield } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { Button } from '@/src/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/src/components/ui/popover';
@@ -22,6 +22,7 @@ const navItems = [
   { id: 'objects', label: '对象', icon: Database, children: [
     { id: 'objects', label: '对象类型', icon: Database },
     { id: 'explorer', label: '对象浏览器', icon: Compass },
+    { id: 'interfaces', label: '接口类型', icon: Boxes },
   ]},
   { id: 'links', label: '链接', icon: LinkIcon, children: [
     { id: 'links', label: '链接类型', icon: LinkIcon },

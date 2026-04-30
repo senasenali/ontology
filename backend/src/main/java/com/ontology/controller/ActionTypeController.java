@@ -169,11 +169,16 @@ public class ActionTypeController {
             if (params != null) {
                 int paramSort = 0;
                 for (Map<String, Object> paramData : params) {
+                    String paramName = (String) paramData.get("paramName");
+                    String paramValue = (String) paramData.get("paramValue");
+                    if (paramName == null || paramName.isBlank() || paramValue == null || paramValue.isBlank()) {
+                        continue;
+                    }
                     ActionRuleParam param = new ActionRuleParam();
                     param.setId("arp_" + System.currentTimeMillis() + "_" + paramSort);
                     param.setActionRuleId(rule.getId());
-                    param.setParamName((String) paramData.get("paramName"));
-                    param.setParamValue((String) paramData.get("paramValue"));
+                    param.setParamName(paramName);
+                    param.setParamValue(paramValue);
                     param.setSortOrder(paramSort++);
                     actionRuleParamMapper.insert(param);
                 }

@@ -2,6 +2,7 @@ package com.ontology.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ontology.entity.ActionRule;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -14,6 +15,6 @@ public interface ActionRuleMapper extends BaseMapper<ActionRule> {
     @Select("SELECT * FROM action_rules WHERE action_type_id = #{actionTypeId} ORDER BY sort_order")
     List<ActionRule> selectByActionTypeId(@Param("actionTypeId") String actionTypeId);
     
-    @Select("DELETE FROM action_rules WHERE action_type_id = #{actionTypeId}")
+    @Delete("DELETE FROM action_rules WHERE action_type_id = #{actionTypeId}")
     void deleteByActionTypeId(@Param("actionTypeId") String actionTypeId);
 }

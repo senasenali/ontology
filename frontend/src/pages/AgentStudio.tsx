@@ -41,7 +41,7 @@ import { cn } from '@/src/lib/utils';
 import { searchStocks, StockItem } from '@/src/data/cnStocks';
 
 const DEMO_LITHIUM_AGENT_ID = 'demo_agent_lithium';
-const MANUAL_LITHIUM_BASE_PRICE = 12.5;
+const MANUAL_LITHIUM_BASE_PRICE = 12.55;
 
 interface Agent {
   id: string;
@@ -106,24 +106,44 @@ interface PriceTransmissionNode {
   previousPrice: number;
   latestPrice: number;
   priceChangePercent: number;
-  level: number;
+  changePercent?: number;
+  level: string;
+  depth: number;
 }
 
 interface PriceTransmissionEdge {
   source: string;
   target: string;
+  linkTypeId?: string;
+  linkTypeName?: string;
+  transmissionCoefficient?: number;
   coefficient: number;
+  impactPercent?: number;
   label: string;
+}
+
+interface PriceTransmissionPath {
+  objectTypeIds: string[];
+  terminalLinkTypeId: string;
+  terminalLinkTypeName: string;
+  depth: number;
+  transmissionCoefficient: number;
+  depthDecay: number;
+  impactPercent: number;
 }
 
 interface PriceTransmissionData {
   sourceObjectType: PriceTransmissionSource;
   nodes: PriceTransmissionNode[];
   edges: PriceTransmissionEdge[];
+  paths?: PriceTransmissionPath[];
   summary: {
     objectTypeCount: number;
     edgeCount: number;
+    pathCount?: number;
     depth: number;
+    sourceObjectTypeId?: string;
+    direction?: string;
   };
 }
 
@@ -974,8 +994,8 @@ function PriceTransmissionGraph({ data }: { data: PriceTransmissionData }) {
     <div className="space-y-5 rounded-[28px] border border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_45%),linear-gradient(180deg,_#f8fbff_0%,_#ffffff_100%)] p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h5 className="text-sm font-semibold text-slate-900">价格传导图</h5>
-            <p className="mt-1 text-xs text-slate-500">以本体图谱风格展示碳酸锂价格变化如何沿对象类型层逐级传导到下游环节。</p>
+          <h5 className="text-sm font-semibold text-slate-900">概念层价格传导分析</h5>
+            <p className="mt-1 text-xs text-slate-500">以本体图谱风格展示源概念价格变化如何沿概念关系逐级传导。</p>
         </div>
         <div className="flex gap-2">
           <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-right shadow-sm">
@@ -1035,8 +1055,8 @@ function PriceTransmissionGraph({ data }: { data: PriceTransmissionData }) {
           ))}
 
           <div className="mt-6 flex items-center justify-between px-2 text-[11px] text-slate-400">
-            <span>对象类型层价格冲击先作用于材料，再逐级传导到中游与终端。</span>
-            <span>传导系数来自对象类型层价格传导分析函数输出。</span>
+            <span>概念层价格冲击沿 link type 关系逐级扩散。</span>
+            <span>传导系数来自概念层价格传导分析函数输出。</span>
           </div>
         </div>
       </div>
@@ -2129,9 +2149,9 @@ export function AgentStudio() {
                 <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                   <div className="flex flex-wrap items-end justify-between gap-4">
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-900">价格传导分析</h3>
+                      <h3 className="text-sm font-semibold text-slate-900">概念层价格传导分析</h3>
                       <p className="mt-1 text-xs text-slate-500">
-                        输入碳酸锂最新价格，系统将以 {MANUAL_LITHIUM_BASE_PRICE.toFixed(2)} 为基准价快速生成本轮传导结果。
+                        输入源概念最新价格，系统将以 {MANUAL_LITHIUM_BASE_PRICE.toFixed(2)} 为基准价快速生成本轮概念层传导结果。
                       </p>
                     </div>
                     <div className="flex flex-wrap items-end gap-3">

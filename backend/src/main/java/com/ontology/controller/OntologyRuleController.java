@@ -2,8 +2,13 @@ package com.ontology.controller;
 
 import com.ontology.entity.OntologyRule;
 import com.ontology.entity.OntologyRuleParam;
+import com.ontology.entity.ObjectType;
+import com.ontology.entity.LinkType;
+import com.ontology.mapper.ObjectTypeMapper;
+import com.ontology.mapper.LinkTypeMapper;
 import com.ontology.mapper.OntologyRuleMapper;
 import com.ontology.mapper.OntologyRuleParamMapper;
+import com.ontology.service.RuleTemplateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +17,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/ontology-rules")
@@ -21,6 +28,9 @@ public class OntologyRuleController {
 
     private final OntologyRuleMapper ruleMapper;
     private final OntologyRuleParamMapper paramMapper;
+    private final ObjectTypeMapper objectTypeMapper;
+    private final LinkTypeMapper linkTypeMapper;
+    private final RuleTemplateService ruleTemplateService;
 
     @GetMapping
     public Map<String, Object> list(@RequestParam(required = false) String category) {
@@ -36,6 +46,7 @@ public class OntologyRuleController {
             rule.setInputParams(paramMapper.selectInputParamsByRuleId(rule.getId()));
             rule.setOutputParams(paramMapper.selectOutputParamsByRuleId(rule.getId()));
         }
+        enrichRelatedEntities(rules);
         
         return Map.of("rules", rules);
     }
@@ -48,7 +59,14 @@ public class OntologyRuleController {
         }
         rule.setInputParams(paramMapper.selectInputParamsByRuleId(id));
         rule.setOutputParams(paramMapper.selectOutputParamsByRuleId(id));
+        enrichRelatedEntities(List.of(rule));
         return Map.of("rule", rule);
+    }
+
+    @PostMapping("/sync-all")
+    public Map<String, Object> syncAll() {
+        ruleTemplateService.syncAllRules();
+        return Map.of("success", true);
     }
 
     @PostMapping
@@ -187,5 +205,45 @@ public class OntologyRuleController {
         // 再删除规则
         ruleMapper.deleteById(id);
         return Map.of("success", true);
+    }
+
+    private void enrichRelatedEntities(List<OntologyRule> rules) {
+        Map<String, ObjectType> objectTypes = objectTypeMapper.selectAllOrdered().stream()
+                .collect(Collectors.toMap(ObjectType::getId, Function.identity(), (a, b) -> a));
+        Map<String, LinkType> linkTypes = linkTypeMapper.selectAllOrdered().stream()
+                .collect(Collectors.toMap(LinkType::getId, Function.identity(), (a, b) -> a));
+
+        for (OntologyRule rule : rules) {
+            String url = rule.getInterfaceUrl();
+            if (url == null || url.isBlank()) continue;
+
+            String objectTypeId = extractAfter(url, "/api/instances/");
+            if (objectTypeId != null && objectTypes.containsKey(objectTypeId)) {
+                ObjectType objectType = objectTypes.get(objectTypeId);
+                rule.setRelatedEntityType("OBJECT_TYPE");
+                rule.setRelatedEntityId(objectType.getId());
+                rule.setRelatedEntityName(objectType.getName());
+                continue;
+            }
+
+            String linkTypeId = extractAfter(url, "/api/link-instances/");
+            if (linkTypeId != null && linkTypes.containsKey(linkTypeId)) {
+                LinkType linkType = linkTypes.get(linkTypeId);
+                rule.setRelatedEntityType("LINK_TYPE");
+                rule.setRelatedEntityId(linkType.getId());
+                rule.setRelatedEntityName(linkType.getName());
+            }
+        }
+    }
+
+    private String extractAfter(String url, String prefix) {
+        int index = url.indexOf(prefix);
+        if (index < 0) return null;
+        String tail = url.substring(index + prefix.length());
+        int slash = tail.indexOf("/");
+        if (slash >= 0) {
+            tail = tail.substring(0, slash);
+        }
+        return tail.isBlank() ? null : tail;
     }
 }
