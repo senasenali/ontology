@@ -1,4 +1,11 @@
 // 流式API客户端
+function currentProjectQuery() {
+  const projectId =
+    typeof window !== 'undefined'
+      ? window.localStorage.getItem('currentProjectId') || 'project_public'
+      : 'project_public';
+  return `projectId=${encodeURIComponent(projectId)}`;
+}
 
 export interface StreamMessage {
   content?: string;
@@ -14,7 +21,7 @@ export async function* streamConversation(
   sessionId?: string,
   includeCurrentOntology?: boolean
 ): AsyncGenerator<StreamMessage, void, unknown> {
-  const response = await fetch('/api/ai/conversation/stream', {
+  const response = await fetch(`/api/ai/conversation/stream?${currentProjectQuery()}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -72,7 +79,7 @@ export async function* streamResearchChat(
   agentId: string,
   message: string
 ): AsyncGenerator<StreamMessage, void, unknown> {
-  const response = await fetch(`/api/research-agents/${agentId}/chat/stream`, {
+  const response = await fetch(`/api/research-agents/${agentId}/chat/stream?${currentProjectQuery()}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

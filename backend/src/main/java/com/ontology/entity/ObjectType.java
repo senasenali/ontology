@@ -25,6 +25,8 @@ public class ObjectType {
     private String backingDataset;
     
     private String industryId;
+
+    private String projectId;
     
     private LocalDateTime createdAt;
     
@@ -34,4 +36,7 @@ public class ObjectType {
 
     @TableField(exist = false)
     private List<Property> properties;
+
+    @TableField(exist = false)
+    private List<ObjectTypeInterfaceMapping> implementedInterfaces;
 }

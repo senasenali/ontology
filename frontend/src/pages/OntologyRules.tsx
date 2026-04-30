@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/src/components/ui/select';
 import { Label } from '@/src/components/ui/label';
 import { Badge } from '@/src/components/ui/badge';
-import { Search, Plus, Shield, Trash2, Pencil, Loader2, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Plus, Shield, Trash2, Pencil, Loader2, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/src/api/client';
 import { cn } from '@/src/lib/utils';
@@ -31,6 +31,9 @@ interface OntologyRule {
   requestMethod: string;
   interfaceUrl: string;
   functionDescription?: string;
+  relatedEntityType?: 'OBJECT_TYPE' | 'LINK_TYPE';
+  relatedEntityId?: string;
+  relatedEntityName?: string;
   createdAt: string;
   updatedAt: string;
   inputParams: OntologyRuleParam[];
@@ -58,50 +61,20 @@ const REQUEST_METHODS = [
   { value: 'DELETE', label: 'DELETE' },
 ];
 
-const PARAM_TYPES = ['string', 'number', 'boolean', 'date', 'object', 'array'];
-
-// 参数编辑组件
-function ParamEditor({
+// 参数只读组件
+function ParamList({
   params,
-  onChange,
   direction,
 }: {
   params: Partial<OntologyRuleParam>[];
-  onChange: (params: Partial<OntologyRuleParam>[]) => void;
   direction: 'INPUT' | 'OUTPUT';
 }) {
-  const addParam = () => {
-    onChange([
-      ...params,
-      {
-        paramName: '',
-        paramType: 'string',
-        isRequired: 0,
-        description: '',
-        paramDirection: direction,
-      },
-    ]);
-  };
-
-  const updateParam = (index: number, field: string, value: any) => {
-    const newParams = [...params];
-    (newParams[index] as any)[field] = value;
-    onChange(newParams);
-  };
-
-  const removeParam = (index: number) => {
-    onChange(params.filter((_, i) => i !== index));
-  };
-
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label className="text-xs font-semibold text-slate-500">
           {direction === 'INPUT' ? '入参' : '出参'}
         </Label>
-        <Button type="button" variant="outline" size="sm" className="h-6 text-xs" onClick={addParam}>
-          <Plus className="w-3 h-3 mr-1" /> 添加参数
-        </Button>
       </div>
       {params.length === 0 ? (
         <div className="text-xs text-slate-400 py-2 text-center border border-dashed border-slate-200 rounded">
@@ -110,59 +83,24 @@ function ParamEditor({
       ) : (
         <div className="space-y-2">
           {params.map((param, index) => (
-            <div key={index} className="grid grid-cols-12 gap-2 items-start p-2 bg-slate-50 rounded text-xs">
-              <div className="col-span-3">
-                <Input
-                  placeholder="参数名"
-                  value={param.paramName || ''}
-                  onChange={(e) => updateParam(index, 'paramName', e.target.value)}
-                  className="h-7 text-xs"
-                />
+            <div key={index} className="grid grid-cols-12 gap-2 items-center p-2 bg-slate-50 rounded text-xs">
+              <div className="col-span-4 font-mono text-slate-700 truncate" title={param.paramName || ''}>
+                {param.paramName || '-'}
               </div>
               <div className="col-span-2">
-                <Select
-                  value={param.paramType || 'string'}
-                  onValueChange={(v) => updateParam(index, 'paramType', v)}
-                >
-                  <SelectTrigger className="h-7 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PARAM_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Badge variant="outline" className="text-[10px] h-5">
+                  {param.paramType || 'string'}
+                </Badge>
               </div>
-              <div className="col-span-2 flex items-center pt-1">
-                <label className="flex items-center gap-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={param.isRequired === 1}
-                    onChange={(e) => updateParam(index, 'isRequired', e.target.checked ? 1 : 0)}
-                    className="rounded border-slate-300"
-                  />
-                  <span className="text-slate-600">必填</span>
-                </label>
+              <div className="col-span-2">
+                {param.isRequired === 1 ? (
+                  <Badge className="text-[10px] h-5 bg-red-100 text-red-600">必填</Badge>
+                ) : (
+                  <span className="text-slate-400">可选</span>
+                )}
               </div>
-              <div className="col-span-4">
-                <Input
-                  placeholder="说明"
-                  value={param.description || ''}
-                  onChange={(e) => updateParam(index, 'description', e.target.value)}
-                  className="h-7 text-xs"
-                />
-              </div>
-              <div className="col-span-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
-                  onClick={() => removeParam(index)}
-                >
-                  <X className="w-3 h-3" />
-                </Button>
+              <div className="col-span-4 text-slate-500 truncate" title={param.description || ''}>
+                {param.description || '-'}
               </div>
             </div>
           ))}
@@ -180,6 +118,7 @@ export function OntologyRules() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<OntologyRule | null>(null);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [expandedRules, setExpandedRules] = useState<Set<string>>(new Set());
 
   // 表单状态
@@ -300,6 +239,19 @@ export function OntologyRules() {
     }
   };
 
+  const handleSyncRules = async () => {
+    setSyncing(true);
+    try {
+      await api.syncOntologyRules();
+      toast.success('本体规则已同步');
+      loadRules();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   // 展开/收起规则详情
   const toggleExpand = (ruleId: string) => {
     setExpandedRules((prev) => {
@@ -341,6 +293,12 @@ export function OntologyRules() {
     return colors[value] || 'bg-slate-100 text-slate-700 border-slate-200';
   };
 
+  const getRelatedEntityLabel = (rule: OntologyRule) => {
+    if (!rule.relatedEntityId) return '未关联';
+    const typeLabel = rule.relatedEntityType === 'LINK_TYPE' ? '链接类型' : '对象类型';
+    return `${typeLabel}: ${rule.relatedEntityName || rule.relatedEntityId}`;
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -352,10 +310,16 @@ export function OntologyRules() {
           </h1>
           <p className="text-slate-500 mt-1">管理本体操作规则和接口配置</p>
         </div>
-        <Button onClick={openCreateDialog} className="gap-2">
-          <Plus className="w-4 h-4" />
-          新增规则
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleSyncRules} disabled={syncing} className="gap-2">
+            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            同步规则
+          </Button>
+          <Button onClick={openCreateDialog} className="gap-2">
+            <Plus className="w-4 h-4" />
+            新增规则
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -391,6 +355,7 @@ export function OntologyRules() {
             <TableRow className="bg-slate-50/50">
               <TableHead className="w-8"></TableHead>
               <TableHead>规则类别</TableHead>
+              <TableHead>关联本体</TableHead>
               <TableHead>函数名</TableHead>
               <TableHead>接口性质</TableHead>
               <TableHead>请求方式</TableHead>
@@ -402,13 +367,13 @@ export function OntologyRules() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} className="h-32 text-center">
+                <TableCell colSpan={9} className="h-32 text-center">
                   <Loader2 className="w-6 h-6 animate-spin mx-auto text-slate-400" />
                 </TableCell>
               </TableRow>
             ) : filteredRules.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="h-32 text-center text-slate-500">
+                <TableCell colSpan={9} className="h-32 text-center text-slate-500">
                   暂无规则数据
                 </TableCell>
               </TableRow>
@@ -432,6 +397,18 @@ export function OntologyRules() {
                       <Badge variant="outline" className={cn('text-xs', getCategoryColor(rule.ruleCategory))}>
                         {getCategoryLabel(rule.ruleCategory)}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-600 max-w-[180px]">
+                      {rule.relatedEntityId ? (
+                        <div title={getRelatedEntityLabel(rule)} className="truncate">
+                          <Badge variant="outline" className="text-[10px] mr-1">
+                            {rule.relatedEntityType === 'LINK_TYPE' ? 'Link' : 'Object'}
+                          </Badge>
+                          {rule.relatedEntityName || rule.relatedEntityId}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">未关联</span>
+                      )}
                     </TableCell>
                     <TableCell className="font-medium">{rule.functionName || '-'}</TableCell>
                     <TableCell>
@@ -484,7 +461,7 @@ export function OntologyRules() {
                   {/* 展开的参数详情 */}
                   {expandedRules.has(rule.id) && (
                     <TableRow className="bg-slate-50/50">
-                      <TableCell colSpan={7} className="p-4">
+                      <TableCell colSpan={9} className="p-4">
                         <div className="grid grid-cols-2 gap-6">
                           {/* 入参 */}
                           <div>
@@ -551,7 +528,7 @@ export function OntologyRules() {
           <DialogHeader>
             <DialogTitle>{editingRule ? '编辑规则' : '新增规则'}</DialogTitle>
             <DialogDescription>
-              配置本体操作规则和接口参数
+              配置本体操作规则；参数由对象类型或链接类型自动同步
             </DialogDescription>
           </DialogHeader>
 
@@ -647,17 +624,20 @@ export function OntologyRules() {
 
             {/* 参数配置 */}
             <div className="border-t pt-4 space-y-4">
-              <h3 className="text-sm font-semibold text-slate-700">参数配置</h3>
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700">参数配置</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  入参和出参为只读，由 Object Type 的属性或 Link Type 的端点配置生成。
+                </p>
+              </div>
               
-              <ParamEditor
+              <ParamList
                 params={formData.inputParams}
-                onChange={(params) => setFormData({ ...formData, inputParams: params })}
                 direction="INPUT"
               />
 
-              <ParamEditor
+              <ParamList
                 params={formData.outputParams}
-                onChange={(params) => setFormData({ ...formData, outputParams: params })}
                 direction="OUTPUT"
               />
             </div>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/src/components/ui/dialog';
 import { Button } from '@/src/components/ui/button';
 import { Badge } from '@/src/components/ui/badge';
-import { Database, Link as LinkIcon, CheckCircle, Trash2, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Database, Link as LinkIcon, CheckCircle, Trash2, Loader2, ChevronLeft, ChevronRight, Layers3, GitBranch } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/src/api/client';
 import { OntologyData } from '@/src/store/ontologyStore';
@@ -25,8 +25,12 @@ export function ReviewDialog({ open, onOpenChange, onUpdate }: ReviewDialogProps
   const [loading, setLoading] = useState(false);
   const [objectTypes, setObjectTypes] = useState<any[]>([]);
   const [linkTypes, setLinkTypes] = useState<any[]>([]);
+  const [interfaces, setInterfaces] = useState<any[]>([]);
+  const [objectTypeInterfaceMappings, setObjectTypeInterfaceMappings] = useState<any[]>([]);
   const [totalObjectTypes, setTotalObjectTypes] = useState(0);
   const [totalLinkTypes, setTotalLinkTypes] = useState(0);
+  const [totalInterfaces, setTotalInterfaces] = useState(0);
+  const [totalObjectTypeInterfaceMappings, setTotalObjectTypeInterfaceMappings] = useState(0);
   const [page, setPage] = useState(1);
   const [actionId, setActionId] = useState<string | null>(null);
   const pageSize = 10;
@@ -38,8 +42,12 @@ export function ReviewDialog({ open, onOpenChange, onUpdate }: ReviewDialogProps
       const res = await api.getPendingReviews(page, pageSize);
       setObjectTypes(res.objectTypes || []);
       setLinkTypes(res.linkTypes || []);
+      setInterfaces(res.interfaces || []);
+      setObjectTypeInterfaceMappings(res.objectTypeInterfaceMappings || []);
       setTotalObjectTypes(res.totalObjectTypes || 0);
       setTotalLinkTypes(res.totalLinkTypes || 0);
+      setTotalInterfaces(res.totalInterfaces || 0);
+      setTotalObjectTypeInterfaceMappings(res.totalObjectTypeInterfaceMappings || 0);
     } catch (err: any) {
       toast.error('加载待审核列表失败');
     } finally {
@@ -117,7 +125,73 @@ export function ReviewDialog({ open, onOpenChange, onUpdate }: ReviewDialogProps
     }
   };
 
-  const total = totalObjectTypes + totalLinkTypes;
+  const handleApproveInterface = async (id: string) => {
+    setActionId(id);
+    try {
+      const res = await api.approveInterface(id);
+      if (res.success) {
+        toast.success('Interface 审核通过');
+        onUpdate(res.data);
+        loadPendingReviews();
+      }
+    } catch (err: any) {
+      toast.error(err.message || '操作失败');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleRejectInterface = async (id: string) => {
+    if (!confirm('确定要删除该 Interface 吗？')) return;
+    setActionId(id);
+    try {
+      const res = await api.rejectInterface(id);
+      if (res.success) {
+        toast.success('Interface 已删除');
+        onUpdate(res.data);
+        loadPendingReviews();
+      }
+    } catch (err: any) {
+      toast.error(err.message || '操作失败');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleApproveImplementation = async (id: string) => {
+    setActionId(id);
+    try {
+      const res = await api.approveObjectTypeInterfaceMapping(id);
+      if (res.success) {
+        toast.success('实现关系审核通过');
+        onUpdate(res.data);
+        loadPendingReviews();
+      }
+    } catch (err: any) {
+      toast.error(err.message || '操作失败');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleRejectImplementation = async (id: string) => {
+    if (!confirm('确定要删除该实现关系吗？')) return;
+    setActionId(id);
+    try {
+      const res = await api.rejectObjectTypeInterfaceMapping(id);
+      if (res.success) {
+        toast.success('实现关系已删除');
+        onUpdate(res.data);
+        loadPendingReviews();
+      }
+    } catch (err: any) {
+      toast.error(err.message || '操作失败');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const total = totalObjectTypes + totalLinkTypes + totalInterfaces + totalObjectTypeInterfaceMappings;
   const totalPages = Math.ceil(total / pageSize);
 
   return (
@@ -229,6 +303,95 @@ export function ReviewDialog({ open, onOpenChange, onUpdate }: ReviewDialogProps
                       disabled={actionId === lt.id}
                     >
                       {actionId === lt.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                      删除
+                    </Button>
+                  </div>
+                </div>
+              ))}
+
+              {interfaces.map((item) => (
+                <div key={item.id} className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg bg-white hover:bg-slate-50">
+                  <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
+                    <Layers3 className="w-5 h-5 text-amber-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-slate-900">{item.name}</span>
+                      <Badge variant="outline" className="text-xs border-amber-200 text-amber-700">Interface</Badge>
+                    </div>
+                    <div className="text-sm text-slate-500 truncate">
+                      ID: {item.id} {item.description && `· ${item.description}`}
+                    </div>
+                    {item.createdAt && (
+                      <div className="text-xs text-slate-400 mt-1">
+                        创建于 {new Date(item.createdAt).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="h-8 gap-1"
+                      onClick={() => handleApproveInterface(item.id)}
+                      disabled={actionId === item.id}
+                    >
+                      {actionId === item.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+                      通过
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-8 gap-1"
+                      onClick={() => handleRejectInterface(item.id)}
+                      disabled={actionId === item.id}
+                    >
+                      {actionId === item.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                      删除
+                    </Button>
+                  </div>
+                </div>
+              ))}
+
+              {objectTypeInterfaceMappings.map((item) => (
+                <div key={item.id} className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg bg-white hover:bg-slate-50">
+                  <div className="w-10 h-10 rounded-lg bg-violet-50 flex items-center justify-center">
+                    <GitBranch className="w-5 h-5 text-violet-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-slate-900">{item.objectTypeName || item.objectTypeId}</span>
+                      <Badge variant="outline" className="text-xs border-violet-200 text-violet-700">实现关系</Badge>
+                    </div>
+                    <div className="text-sm text-slate-500 truncate">
+                      Interface: {item.interfaceName || item.interfaceId}
+                      {item.mappingComplete === false ? ' · 必填映射未完成' : ''}
+                    </div>
+                    {item.createdAt && (
+                      <div className="text-xs text-slate-400 mt-1">
+                        创建于 {new Date(item.createdAt).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="h-8 gap-1"
+                      onClick={() => handleApproveImplementation(item.id)}
+                      disabled={actionId === item.id}
+                    >
+                      {actionId === item.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+                      通过
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-8 gap-1"
+                      onClick={() => handleRejectImplementation(item.id)}
+                      disabled={actionId === item.id}
+                    >
+                      {actionId === item.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                       删除
                     </Button>
                   </div>

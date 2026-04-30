@@ -27,6 +27,8 @@ public class OntologyRule {
     private String interfaceUrl;
     
     private String functionDescription;
+
+    private String projectId;
     
     private LocalDateTime createdAt;
     
@@ -37,4 +39,13 @@ public class OntologyRule {
     
     @TableField(exist = false)
     private List<OntologyRuleParam> outputParams;
+
+    @TableField(exist = false)
+    private String relatedEntityType;
+
+    @TableField(exist = false)
+    private String relatedEntityId;
+
+    @TableField(exist = false)
+    private String relatedEntityName;
 }

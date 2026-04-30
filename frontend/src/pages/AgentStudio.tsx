@@ -41,7 +41,7 @@ import { cn } from '@/src/lib/utils';
 import { searchStocks, StockItem } from '@/src/data/cnStocks';
 
 const DEMO_LITHIUM_AGENT_ID = 'demo_agent_lithium';
-const MANUAL_LITHIUM_BASE_PRICE = 12.5;
+const MANUAL_LITHIUM_BASE_PRICE = 12.55;
 
 interface Agent {
   id: string;
@@ -106,24 +106,44 @@ interface PriceTransmissionNode {
   previousPrice: number;
   latestPrice: number;
   priceChangePercent: number;
-  level: number;
+  changePercent?: number;
+  level: string;
+  depth: number;
 }
 
 interface PriceTransmissionEdge {
   source: string;
   target: string;
+  linkTypeId?: string;
+  linkTypeName?: string;
+  transmissionCoefficient?: number;
   coefficient: number;
+  impactPercent?: number;
   label: string;
+}
+
+interface PriceTransmissionPath {
+  objectTypeIds: string[];
+  terminalLinkTypeId: string;
+  terminalLinkTypeName: string;
+  depth: number;
+  transmissionCoefficient: number;
+  depthDecay: number;
+  impactPercent: number;
 }
 
 interface PriceTransmissionData {
   sourceObjectType: PriceTransmissionSource;
   nodes: PriceTransmissionNode[];
   edges: PriceTransmissionEdge[];
+  paths?: PriceTransmissionPath[];
   summary: {
     objectTypeCount: number;
     edgeCount: number;
+    pathCount?: number;
     depth: number;
+    sourceObjectTypeId?: string;
+    direction?: string;
   };
 }
 
@@ -974,8 +994,8 @@ function PriceTransmissionGraph({ data }: { data: PriceTransmissionData }) {
     <div className="space-y-5 rounded-[28px] border border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_45%),linear-gradient(180deg,_#f8fbff_0%,_#ffffff_100%)] p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h5 className="text-sm font-semibold text-slate-900">价格传导图</h5>
-            <p className="mt-1 text-xs text-slate-500">以本体图谱风格展示碳酸锂价格变化如何沿对象类型层逐级传导到下游环节。</p>
+          <h5 className="text-sm font-semibold text-slate-900">概念层价格传导分析</h5>
+            <p className="mt-1 text-xs text-slate-500">以本体图谱风格展示源概念价格变化如何沿概念关系逐级传导。</p>
         </div>
         <div className="flex gap-2">
           <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-right shadow-sm">
@@ -1035,8 +1055,8 @@ function PriceTransmissionGraph({ data }: { data: PriceTransmissionData }) {
           ))}
 
           <div className="mt-6 flex items-center justify-between px-2 text-[11px] text-slate-400">
-            <span>对象类型层价格冲击先作用于材料，再逐级传导到中游与终端。</span>
-            <span>传导系数来自对象类型层价格传导分析函数输出。</span>
+            <span>概念层价格冲击沿 link type 关系逐级扩散。</span>
+            <span>传导系数来自概念层价格传导分析函数输出。</span>
           </div>
         </div>
       </div>
@@ -1316,7 +1336,7 @@ function EventInsightCard({ event }: { event: HotEventItem }) {
 }
 
 function HotEventInterpretationPanel() {
-  const [events, setEvents] = useState<HotEventItem[]>(MOCK_HOT_EVENTS);
+  const [events, setEvents] = useState<HotEventItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -1328,8 +1348,8 @@ function HotEventInterpretationPanel() {
     api
       .getTrackedEvents()
       .then((result) => {
-        if (!mounted || !result.events?.length) return;
-        const nextEvents = result.events.map((item: any) => ({
+        if (!mounted) return;
+        const nextEvents = (result.events || []).map((item: any) => ({
           id: item.id,
           title: item.title,
           category: item.category,
@@ -1347,9 +1367,7 @@ function HotEventInterpretationPanel() {
         setEvents(nextEvents);
         setSelectedId(nextEvents[0]?.id || null);
       })
-      .catch(() => {
-        // keep fallback data
-      })
+      .catch(() => {})
       .finally(() => {
         if (mounted) setLoading(false);
       });
@@ -1738,10 +1756,10 @@ export function OntologyQAPanel({ fallbackAgentId }: { fallbackAgentId?: string 
 }
 
 export function AgentStudio() {
-  const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
-  const [eventsByAgent, setEventsByAgent] = useState<Record<string, AgentEvent[]>>(MOCK_EVENTS);
-  const [analysesByAgent, setAnalysesByAgent] = useState<Record<string, AgentAnalysis[]>>(MOCK_ANALYSES);
-  const [selectedId, setSelectedId] = useState<string | null>(MOCK_AGENTS[0]?.id || null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [eventsByAgent, setEventsByAgent] = useState<Record<string, AgentEvent[]>>({});
+  const [analysesByAgent, setAnalysesByAgent] = useState<Record<string, AgentAnalysis[]>>({});
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [running, setRunning] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'events' | 'analyses'>('analyses');
@@ -1758,41 +1776,53 @@ export function AgentStudio() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadLithiumRuntimeData = async () => {
+    const loadAgents = async () => {
       try {
-        const [eventsResult, analysesResult] = await Promise.all([
-          api.getAgentEvents(DEMO_LITHIUM_AGENT_ID),
-          api.getAgentAnalyses(DEMO_LITHIUM_AGENT_ID),
-        ]);
+        const result = await api.getResearchAgents();
 
         if (cancelled) return;
 
-        const nextEvents = (eventsResult.events || []).map(mapBackendEvent);
-        const nextAnalyses = (analysesResult.analyses || []).map(mapBackendAnalysis);
+        const nextAgents = result.agents || [];
+        setAgents(nextAgents);
+        setSelectedId((prev) => (prev && nextAgents.some((agent: Agent) => agent.id === prev) ? prev : nextAgents[0]?.id || null));
 
-        if (nextEvents.length > 0) {
-          setEventsByAgent((prev) => ({ ...prev, [DEMO_LITHIUM_AGENT_ID]: nextEvents }));
-        }
+        const details = await Promise.all(
+          nextAgents.map(async (agent: Agent) => {
+            const [eventsResult, analysesResult] = await Promise.all([
+              api.getAgentEvents(agent.id),
+              api.getAgentAnalyses(agent.id),
+            ]);
 
-        if (nextAnalyses.length > 0) {
-          setAnalysesByAgent((prev) => ({ ...prev, [DEMO_LITHIUM_AGENT_ID]: nextAnalyses }));
-          const latestRunAt = nextAnalyses[0]?.created_at || nextEvents[0]?.created_at || null;
-          if (latestRunAt) {
-            setAgents((prev) =>
-              prev.map((agent) =>
-                agent.id === DEMO_LITHIUM_AGENT_ID
-                  ? { ...agent, last_run_at: latestRunAt, updated_at: latestRunAt }
-                  : agent,
-              ),
-            );
-          }
-        }
+            return {
+              agentId: agent.id,
+              events: (eventsResult.events || []).map(mapBackendEvent),
+              analyses: (analysesResult.analyses || []).map(mapBackendAnalysis),
+            };
+          }),
+        );
+
+        if (cancelled) return;
+
+        const nextEventsByAgent: Record<string, AgentEvent[]> = {};
+        const nextAnalysesByAgent: Record<string, AgentAnalysis[]> = {};
+        details.forEach(({ agentId, events, analyses }) => {
+          nextEventsByAgent[agentId] = events;
+          nextAnalysesByAgent[agentId] = analyses;
+        });
+
+        setEventsByAgent(nextEventsByAgent);
+        setAnalysesByAgent(nextAnalysesByAgent);
       } catch {
-        // keep demo fallback
+        if (!cancelled) {
+          setAgents([]);
+          setSelectedId(null);
+          setEventsByAgent({});
+          setAnalysesByAgent({});
+        }
       }
     };
 
-    loadLithiumRuntimeData();
+    loadAgents();
 
     return () => {
       cancelled = true;
@@ -1844,33 +1874,28 @@ export function AgentStudio() {
         setAnalysesByAgent((prev) => ({ ...prev, [agentId]: nextAnalyses }));
         toast.success('数据已刷新');
       } else {
-        await wait(5000);
-        const agent = agents.find((item) => item.id === agentId) || null;
-        const shouldSeedDemo = agent && (eventsByAgent[agentId] || []).length === 0 && (analysesByAgent[agentId] || []).length === 0;
-        const starterEvent = shouldSeedDemo && agent ? createStarterEvent(agent) : null;
-        const starterAnalysis = shouldSeedDemo && agent && starterEvent ? createStarterAnalysis(agent, starterEvent) : null;
+        await api.runResearchAgent(agentId);
+        const [eventsResult, analysesResult] = await Promise.all([
+          api.getAgentEvents(agentId),
+          api.getAgentAnalyses(agentId),
+        ]);
+        const nextEvents = (eventsResult.events || []).map(mapBackendEvent);
+        const nextAnalyses = (analysesResult.analyses || []).map(mapBackendAnalysis);
+        const latestRunAt = nextAnalyses[0]?.created_at || nextEvents[0]?.created_at || formatDateTime(new Date());
 
         setAgents((prev) =>
           prev.map((agent) =>
             agent.id === agentId
               ? {
                   ...agent,
-                  last_run_at: formatDateTime(new Date()),
-                  updated_at: formatDateTime(new Date()),
+                  last_run_at: latestRunAt,
+                  updated_at: latestRunAt,
                 }
               : agent,
           ),
         );
-
-        setEventsByAgent((prev) => {
-          if (!starterEvent) return prev;
-          return { ...prev, [agentId]: [starterEvent] };
-        });
-
-        setAnalysesByAgent((prev) => {
-          if (!starterAnalysis) return prev;
-          return { ...prev, [agentId]: [starterAnalysis] };
-        });
+        setEventsByAgent((prev) => ({ ...prev, [agentId]: nextEvents }));
+        setAnalysesByAgent((prev) => ({ ...prev, [agentId]: nextAnalyses }));
 
         toast.success('数据已刷新');
       }
@@ -2129,9 +2154,9 @@ export function AgentStudio() {
                 <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                   <div className="flex flex-wrap items-end justify-between gap-4">
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-900">价格传导分析</h3>
+                      <h3 className="text-sm font-semibold text-slate-900">概念层价格传导分析</h3>
                       <p className="mt-1 text-xs text-slate-500">
-                        输入碳酸锂最新价格，系统将以 {MANUAL_LITHIUM_BASE_PRICE.toFixed(2)} 为基准价快速生成本轮传导结果。
+                        输入源概念最新价格，系统将以 {MANUAL_LITHIUM_BASE_PRICE.toFixed(2)} 为基准价快速生成本轮概念层传导结果。
                       </p>
                     </div>
                     <div className="flex flex-wrap items-end gap-3">

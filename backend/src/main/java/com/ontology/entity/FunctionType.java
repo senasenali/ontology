@@ -33,6 +33,8 @@ public class FunctionType {
     private String implementationType;
     
     private String status;
+
+    private String projectId;
     
     private LocalDateTime createdAt;
     

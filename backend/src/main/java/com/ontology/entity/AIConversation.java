@@ -19,6 +19,8 @@ public class AIConversation {
     private String messages;
     
     private String previewOntology;
+
+    private String projectId;
     
     private LocalDateTime createdAt;
     

@@ -29,6 +29,8 @@ public class AgentEvent {
     private String impactLevel;
     
     private String relatedEntities;
+
+    private String projectId;
     
     private LocalDateTime createdAt;
 }

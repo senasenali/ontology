@@ -14,6 +14,18 @@ const JAVA_BACKEND = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
 
+function getProjectId(source: { query?: Record<string, any> } | string | undefined) {
+  if (typeof source === 'string') {
+    return source || 'project_public';
+  }
+  return String(source?.query?.projectId || 'project_public');
+}
+
+function withProjectId(path: string, projectId: string) {
+  const query = `projectId=${encodeURIComponent(getProjectId(projectId))}`;
+  return `${JAVA_BACKEND}${path}${path.includes('?') ? '&' : '?'}${query}`;
+}
+
 function checkAI(): boolean {
   return !!DEEPSEEK_API_KEY;
 }
@@ -43,16 +55,16 @@ async function fetchJson(url: string, init?: any) {
   return data;
 }
 
-async function saveAgentEvent(agentId: string, event: any) {
-  await fetchJson(`${JAVA_BACKEND}/api/research-agents/${agentId}/events`, {
+async function saveAgentEvent(agentId: string, event: any, projectId: string) {
+  await fetchJson(withProjectId(`/api/research-agents/${agentId}/events`, projectId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(event),
   });
 }
 
-async function saveAgentAnalysis(agentId: string, analysis: any) {
-  await fetchJson(`${JAVA_BACKEND}/api/research-agents/${agentId}/analyses`, {
+async function saveAgentAnalysis(agentId: string, analysis: any, projectId: string) {
+  await fetchJson(withProjectId(`/api/research-agents/${agentId}/analyses`, projectId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(analysis),
@@ -76,7 +88,7 @@ function buildLithiumFallbackAnalysis(
     content: `碳酸锂最新价格由 ${previousPrice.toFixed(2)} 变为 ${latestPrice.toFixed(2)}，单次波动 ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%。本轮价格冲击首先传导至${uniqueTypeNames(firstLayer) || '一阶材料环节'}，随后继续扩散到${uniqueTypeNames(secondLayer) || '二阶制造环节'}。当前更需要观察的是中游提价速度与终端利润消化能力是否匹配本轮成本变化。`,
     key_findings: [
       `碳酸锂价格单次波动达到 ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%，已超过 5% 触发阈值。`,
-      `一阶受影响环节集中在${uniqueTypeNames(firstLayer) || '材料环节'}，对象类型层传导已清晰覆盖关键中游节点。`,
+      `一阶受影响环节集中在${uniqueTypeNames(firstLayer) || '材料环节'}，概念层传导已清晰覆盖关键中游节点。`,
       `二阶传导已覆盖${uniqueTypeNames(secondLayer) || '制造环节'}，说明成本冲击正在进一步向下游扩散。`,
     ],
     recommendation: '继续跟踪电解液、电芯与动力电池的跟涨幅度，判断成本压力会更多由中游吸收还是继续向终端传导。',
@@ -147,7 +159,7 @@ ${JSON.stringify(transmissionData, null, 2)}
   return { analysis, analysisSource };
 }
 
-async function runLithiumPriceTracking(agentId: string, agent: any) {
+async function runLithiumPriceTracking(agentId: string, agent: any, projectId: string) {
   const compareResult = await fetchJson(
     `${JAVA_BACKEND}/api/lithium-price-monitor/compare?instanceId=${encodeURIComponent(LITHIUM_INSTANCE_ID)}&thresholdPercent=5`,
   );
@@ -202,7 +214,7 @@ async function runLithiumPriceTracking(agentId: string, agent: any) {
     related_entities: JSON.stringify(['碳酸锂', '电池电解液', '正极材料', '电芯', '电池', '新能源汽车']),
   };
 
-  await saveAgentEvent(agentId, eventPayload);
+  await saveAgentEvent(agentId, eventPayload, projectId);
 
   const { analysis, analysisSource } = await buildLithiumStructuredAnalysis(
     agent,
@@ -228,7 +240,7 @@ async function runLithiumPriceTracking(agentId: string, agent: any) {
     recommendation: analysis.recommendation || '继续观察价格波动是否继续向中下游传导。',
   };
 
-  await saveAgentAnalysis(agentId, analysisPayload);
+  await saveAgentAnalysis(agentId, analysisPayload, projectId);
 
   return {
     success: true,
@@ -253,8 +265,9 @@ router.post('/:id/manual-price-analysis', async (req, res) => {
   }
 
   try {
+    const projectId = getProjectId(req);
     let agent: any = null;
-    const agentResponse = await fetch(`${JAVA_BACKEND}/api/research-agents/${req.params.id}`);
+    const agentResponse = await fetch(withProjectId(`/api/research-agents/${req.params.id}`, projectId));
     if (agentResponse.ok) {
       const agentData = await agentResponse.json();
       agent = agentData.agent;
@@ -269,7 +282,7 @@ router.post('/:id/manual-price-analysis', async (req, res) => {
     }
 
     const latestPrice = Number(req.body?.latestPrice);
-    const previousPrice = Number(req.body?.previousPrice ?? 12.5);
+    const previousPrice = Number(req.body?.previousPrice ?? 12.55);
     const depth = Number(req.body?.depth ?? 4);
 
     if (!Number.isFinite(latestPrice) || latestPrice <= 0) {
@@ -325,7 +338,7 @@ router.post('/:id/manual-price-analysis', async (req, res) => {
       recommendation: analysis.recommendation || '继续观察价格波动是否继续向中下游传导。',
     };
 
-    await saveAgentAnalysis(req.params.id, analysisPayload);
+    await saveAgentAnalysis(req.params.id, analysisPayload, projectId);
 
     res.json({
       success: true,
@@ -413,9 +426,9 @@ const RESEARCH_SYSTEM_PROMPT = `你是专业的投研分析师，擅长基于本
 - 给出可验证的投资建议`;
 
 // Get all research agents
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/research-agents`);
+    const response = await fetch(withProjectId('/api/research-agents', getProjectId(req)));
     const data = await response.json();
     res.json(data);
   } catch (err: any) {
@@ -426,7 +439,7 @@ router.get('/', async (_req, res) => {
 // Create research agent
 router.post('/', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/research-agents`, {
+    const response = await fetch(withProjectId('/api/research-agents', getProjectId(req)), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req.body),
@@ -441,7 +454,7 @@ router.post('/', async (req, res) => {
 // Update research agent
 router.put('/:id', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/research-agents/${req.params.id}`, {
+    const response = await fetch(withProjectId(`/api/research-agents/${req.params.id}`, getProjectId(req)), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req.body),
@@ -456,7 +469,7 @@ router.put('/:id', async (req, res) => {
 // Delete research agent
 router.delete('/:id', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/research-agents/${req.params.id}`, {
+    const response = await fetch(withProjectId(`/api/research-agents/${req.params.id}`, getProjectId(req)), {
       method: 'DELETE',
     });
     const data = await response.json();
@@ -469,7 +482,7 @@ router.delete('/:id', async (req, res) => {
 // Get agent events
 router.get('/:id/events', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/research-agents/${req.params.id}/events`);
+    const response = await fetch(withProjectId(`/api/research-agents/${req.params.id}/events`, getProjectId(req)));
     const data = await response.json();
     res.json(data);
   } catch (err: any) {
@@ -480,7 +493,7 @@ router.get('/:id/events', async (req, res) => {
 // Get agent analyses
 router.get('/:id/analyses', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/research-agents/${req.params.id}/analyses`);
+    const response = await fetch(withProjectId(`/api/research-agents/${req.params.id}/analyses`, getProjectId(req)));
     const data = await response.json();
     res.json(data);
   } catch (err: any) {
@@ -495,8 +508,9 @@ router.post('/:id/run', async (req, res) => {
   }
 
   try {
+    const projectId = getProjectId(req);
     let agent: any = null;
-    const agentResponse = await fetch(`${JAVA_BACKEND}/api/research-agents/${req.params.id}`);
+    const agentResponse = await fetch(withProjectId(`/api/research-agents/${req.params.id}`, projectId));
     if (agentResponse.ok) {
       const agentData = await agentResponse.json();
       agent = agentData.agent;
@@ -507,12 +521,12 @@ router.post('/:id/run', async (req, res) => {
     }
 
     if (isLithiumTrackingAgent(agent, req.params.id)) {
-      const result = await runLithiumPriceTracking(req.params.id, agent);
+      const result = await runLithiumPriceTracking(req.params.id, agent, projectId);
       return res.json(result);
     }
 
     // Get ontology from Java backend
-    const ontologyResponse = await fetch(`${JAVA_BACKEND}/api/ontology`);
+    const ontologyResponse = await fetch(withProjectId('/api/ontology', projectId));
     const ontology = await ontologyResponse.json();
     const ontologyContext = JSON.stringify(ontology, null, 2);
 
@@ -569,7 +583,7 @@ ${ontologyContext}
     const savedEvents: any[] = [];
     for (const evt of events) {
       try {
-        const saveResponse = await fetch(`${JAVA_BACKEND}/api/research-agents/${req.params.id}/events`, {
+        const saveResponse = await fetch(withProjectId(`/api/research-agents/${req.params.id}/events`, projectId), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -642,7 +656,7 @@ ${events.map((e: any, i: number) => `${i + 1}. 【${e.impact_level}】${e.title}
 
     // Save analysis to Java backend
     if (analysis) {
-      await fetch(`${JAVA_BACKEND}/api/research-agents/${req.params.id}/analyses`, {
+      await fetch(withProjectId(`/api/research-agents/${req.params.id}/analyses`, projectId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -671,9 +685,10 @@ router.post('/:id/chat/stream', async (req, res) => {
   try {
     const { message } = req.body;
     const agentId = req.params.id;
+    const projectId = getProjectId(req);
 
     // Get agent info from Java backend
-    const agentResponse = await fetch(`${JAVA_BACKEND}/api/research-agents/${agentId}`);
+    const agentResponse = await fetch(withProjectId(`/api/research-agents/${agentId}`, projectId));
     if (!agentResponse.ok) {
       return res.status(404).json({ error: 'Agent not found' });
     }
@@ -681,7 +696,7 @@ router.post('/:id/chat/stream', async (req, res) => {
     const agent = agentData.agent;
 
     // Get ontology from Java backend
-    const ontologyResponse = await fetch(`${JAVA_BACKEND}/api/ontology`);
+    const ontologyResponse = await fetch(withProjectId('/api/ontology', projectId));
     const ontology = await ontologyResponse.json();
     const ontologyContext = JSON.stringify(ontology, null, 2);
 

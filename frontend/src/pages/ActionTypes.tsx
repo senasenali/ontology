@@ -181,7 +181,7 @@ export function ActionTypes() {
     try {
       const saveData = {
         ...formData,
-        rules,
+        rules: rules.map(normalizeRuleForSave),
         effects: effects.filter(e => e.effectType === 'NOTIFICATION'), // 只保存通知类型
       };
 
@@ -221,19 +221,17 @@ export function ActionTypes() {
     const fields: ExecuteField[] = [];
     const fieldMap = new Map<string, ExecuteField>();
     action.rules?.forEach(rule => {
-      const derivedParams = (rule.params && rule.params.length > 0)
-        ? rule.params
-        : rule.ruleType === 'ONTOLOGY'
-          ? buildOntologyRuleParams(rule.ontologyRuleId)
-          : buildFunctionRuleParams(rule.functionTypeId);
+      const derivedParams = rule.ruleType === 'ONTOLOGY'
+        ? buildOntologyExecutionParams(rule.ontologyRuleId, rule.params)
+        : buildFunctionExecutionParams(rule.functionTypeId, rule.params);
       derivedParams.forEach(param => {
         if (!param.paramName) return;
         const meta = getParamMeta(rule, param.paramName);
         const nextField: ExecuteField = {
           key: param.paramName,
-          label: meta?.description || param.paramName,
+          label: param.paramName,
           required: meta?.isRequired === 1,
-          placeholder: `请输入${meta?.description || param.paramName}`,
+          placeholder: meta?.description ? `请输入${meta.description}` : `请输入${param.paramName}`,
           paramType: meta?.paramType,
           defaultValue: param.paramValue || '',
         };
@@ -300,6 +298,12 @@ export function ActionTypes() {
     return match?.[1];
   };
 
+  const getLinkTypeIdFromInterfaceUrl = (interfaceUrl?: string) => {
+    if (!interfaceUrl) return undefined;
+    const match = interfaceUrl.match(/\/api\/link-instances\/([^/{}]+)/);
+    return match?.[1];
+  };
+
   const buildFallbackInputParams = (ruleId: string | undefined) => {
     const selectedRule = getOntologyRuleById(ruleId);
     const objectTypeId = getObjectTypeIdFromInterfaceUrl(selectedRule?.interfaceUrl);
@@ -322,7 +326,7 @@ export function ActionTypes() {
       }));
   };
 
-  const buildOntologyRuleParams = (ruleId: string | undefined, existingParams?: ActionRuleParam[]) => {
+  const buildOntologyExecutionParams = (ruleId: string | undefined, existingParams?: ActionRuleParam[]) => {
     const selectedRule = getOntologyRuleById(ruleId);
     const templateParams = selectedRule?.inputParams?.length
       ? selectedRule.inputParams
@@ -338,11 +342,11 @@ export function ActionTypes() {
 
     return templateParams.map((param) => ({
       paramName: param.paramName,
-      paramValue: existingValueMap.get(param.paramName) || '',
+      paramValue: existingValueMap.get(param.paramName) || getDefaultOntologyBindingValue(selectedRule, param.paramName) || '',
     }));
   };
 
-  const buildFunctionRuleParams = (functionTypeId: string | undefined, existingParams?: ActionRuleParam[]) => {
+  const buildFunctionExecutionParams = (functionTypeId: string | undefined, existingParams?: ActionRuleParam[]) => {
     const selectedFunction = functionTypes.find((item) => item.id === functionTypeId);
     const templateParams = selectedFunction?.inputParams || [];
 
@@ -358,6 +362,61 @@ export function ActionTypes() {
       paramName: param.paramCode || param.paramName,
       paramValue: existingValueMap.get(param.paramCode || param.paramName) || param.defaultValue || '',
     }));
+  };
+
+  const getDefaultOntologyBindingValue = (rule: OntologyRule | undefined, paramName: string) => {
+    if (paramName !== 'linkTypeId') return '';
+    return getLinkTypeIdFromInterfaceUrl(rule?.interfaceUrl) || '';
+  };
+
+  const buildOntologyBindingParams = (ruleId: string | undefined, existingParams?: ActionRuleParam[]) => {
+    const selectedRule = getOntologyRuleById(ruleId);
+    const templateParams = selectedRule?.inputParams?.length
+      ? selectedRule.inputParams
+      : buildFallbackInputParams(ruleId);
+    const allowedNames = new Set(templateParams.map((param) => param.paramName));
+    const existingValueMap = new Map(
+      (existingParams || []).map((param) => [param.paramName, param.paramValue || ''])
+    );
+
+    return templateParams
+      .map((param) => ({
+        paramName: param.paramName,
+        paramValue: existingValueMap.get(param.paramName) || getDefaultOntologyBindingValue(selectedRule, param.paramName) || '',
+      }))
+      .filter((param) => allowedNames.has(param.paramName) && param.paramValue.trim());
+  };
+
+  const buildFunctionBindingParams = (functionTypeId: string | undefined, existingParams?: ActionRuleParam[]) => {
+    const selectedFunction = functionTypes.find((item) => item.id === functionTypeId);
+    const templateParams = selectedFunction?.inputParams || [];
+    const allowedNames = new Set(templateParams.map((param) => param.paramCode || param.paramName));
+    const existingValueMap = new Map(
+      (existingParams || []).map((param) => [param.paramName, param.paramValue || ''])
+    );
+
+    return templateParams
+      .map((param) => {
+        const paramName = param.paramCode || param.paramName;
+        return {
+          paramName,
+          paramValue: existingValueMap.get(paramName) || param.defaultValue || '',
+        };
+      })
+      .filter((param) => allowedNames.has(param.paramName) && String(param.paramValue || '').trim());
+  };
+
+  const normalizeRuleForSave = (rule: ActionRule): ActionRule => {
+    if (rule.ruleType === 'ONTOLOGY') {
+      return {
+        ...rule,
+        params: buildOntologyBindingParams(rule.ontologyRuleId, rule.params),
+      };
+    }
+    return {
+      ...rule,
+      params: buildFunctionBindingParams(rule.functionTypeId, rule.params),
+    };
   };
 
   const updateRule = (index: number, field: keyof ActionRule, value: any) => {
@@ -383,11 +442,11 @@ export function ActionTypes() {
     }
 
     if (field === 'ontologyRuleId') {
-      newRules[index].params = buildOntologyRuleParams(value, newRules[index].params);
+      newRules[index].params = buildOntologyBindingParams(value, newRules[index].params);
     }
 
     if (field === 'functionTypeId') {
-      newRules[index].params = buildFunctionRuleParams(value, newRules[index].params);
+      newRules[index].params = buildFunctionBindingParams(value, newRules[index].params);
     }
 
     setRules(newRules);
@@ -744,17 +803,6 @@ export function ActionTypes() {
               ))
             )}
             
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Label>实例ID (instanceId)</Label>
-                <span className="text-xs text-slate-400">选填</span>
-              </div>
-              <Input
-                value={executeParams['instanceId'] || ''}
-                onChange={(e) => setExecuteParams({ ...executeParams, instanceId: e.target.value })}
-                placeholder="如需关联当前实例，可填写实例ID"
-              />
-            </div>
           </div>
 
           <DialogFooter>

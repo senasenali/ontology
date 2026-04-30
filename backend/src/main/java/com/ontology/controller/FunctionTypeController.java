@@ -21,12 +21,14 @@ public class FunctionTypeController {
     private final FunctionParamMapper functionParamMapper;
     
     @GetMapping
-    public Map<String, Object> list(@RequestParam(required = false) String category) {
+    public Map<String, Object> list(@RequestParam(required = false) String category,
+                                    @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         List<FunctionType> list;
         if (category != null && !category.isEmpty()) {
-            list = functionTypeMapper.selectByCategory(category);
+            list = functionTypeMapper.selectByCategory(projectId, category);
         } else {
-            list = functionTypeMapper.selectAllActive();
+            list = functionTypeMapper.selectAllActive(projectId);
         }
         
         // 加载参数
@@ -38,9 +40,10 @@ public class FunctionTypeController {
     }
     
     @GetMapping("/{id}")
-    public Map<String, Object> getById(@PathVariable String id) {
+    public Map<String, Object> getById(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         FunctionType ft = functionTypeMapper.selectById(id);
-        if (ft == null) {
+        if (ft == null || !projectId.equals(ft.getProjectId())) {
             return Map.of("success", false, "error", "Function not found");
         }
         loadParams(ft);
@@ -49,7 +52,8 @@ public class FunctionTypeController {
     
     @PostMapping
     @Transactional
-    public Map<String, Object> create(@RequestBody Map<String, Object> data) {
+    public Map<String, Object> create(@RequestBody Map<String, Object> data, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         FunctionType ft = new FunctionType();
         ft.setId("func_" + System.currentTimeMillis());
         ft.setCode((String) data.get("code"));
@@ -61,22 +65,24 @@ public class FunctionTypeController {
         ft.setInterfaceUrl((String) data.get("interfaceUrl"));
         ft.setImplementationType((String) data.getOrDefault("implementationType", "JAVA"));
         ft.setStatus("ACTIVE");
+        ft.setProjectId(projectId);
         ft.setCreatedAt(LocalDateTime.now());
         ft.setUpdatedAt(LocalDateTime.now());
         
         functionTypeMapper.insert(ft);
         
         // 保存参数
-        saveParams(ft.getId(), data);
+        saveParams(ft.getId(), data, projectId);
         
         return Map.of("success", true, "function", ft);
     }
     
     @PutMapping("/{id}")
     @Transactional
-    public Map<String, Object> update(@PathVariable String id, @RequestBody Map<String, Object> data) {
+    public Map<String, Object> update(@PathVariable String id, @RequestBody Map<String, Object> data, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         FunctionType ft = functionTypeMapper.selectById(id);
-        if (ft == null) {
+        if (ft == null || !projectId.equals(ft.getProjectId())) {
             return Map.of("success", false, "error", "Function not found");
         }
         
@@ -95,7 +101,7 @@ public class FunctionTypeController {
         // 更新参数
         if (data.containsKey("inputParams") || data.containsKey("outputParams")) {
             functionParamMapper.deleteByFunctionId(id);
-            saveParams(id, data);
+            saveParams(id, data, projectId);
         }
         
         return Map.of("success", true, "function", ft);
@@ -103,7 +109,12 @@ public class FunctionTypeController {
     
     @DeleteMapping("/{id}")
     @Transactional
-    public Map<String, Object> delete(@PathVariable String id) {
+    public Map<String, Object> delete(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
+        FunctionType current = functionTypeMapper.selectById(id);
+        if (current == null || !projectId.equals(current.getProjectId())) {
+            return Map.of("success", false, "error", "Function not found");
+        }
         // 软删除
         FunctionType ft = new FunctionType();
         ft.setId(id);
@@ -125,7 +136,7 @@ public class FunctionTypeController {
     }
     
     @SuppressWarnings("unchecked")
-    private void saveParams(String functionId, Map<String, Object> data) {
+    private void saveParams(String functionId, Map<String, Object> data, String projectId) {
         int sortOrder = 0;
         
         // 保存入参
@@ -144,6 +155,7 @@ public class FunctionTypeController {
                 fp.setDescription((String) param.get("description"));
                 fp.setSourceType((String) param.getOrDefault("sourceType", "USER_INPUT"));
                 fp.setSortOrder(sortOrder++);
+                fp.setProjectId(projectId);
                 functionParamMapper.insert(fp);
             }
         }
@@ -163,6 +175,7 @@ public class FunctionTypeController {
                 fp.setIsRequired(0);
                 fp.setDescription((String) param.get("description"));
                 fp.setSortOrder(sortOrder++);
+                fp.setProjectId(projectId);
                 functionParamMapper.insert(fp);
             }
         }

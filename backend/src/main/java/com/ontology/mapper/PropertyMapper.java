@@ -11,6 +11,9 @@ import java.util.List;
 @Mapper
 public interface PropertyMapper extends BaseMapper<Property> {
     
+    @Select("SELECT * FROM properties WHERE object_type_id = #{objectTypeId} AND project_id = #{projectId} ORDER BY sort_order")
+    List<Property> selectByObjectTypeId(@Param("objectTypeId") String objectTypeId, @Param("projectId") String projectId);
+
     @Select("SELECT * FROM properties WHERE object_type_id = #{objectTypeId} ORDER BY sort_order")
     List<Property> selectByObjectTypeId(@Param("objectTypeId") String objectTypeId);
 }

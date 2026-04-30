@@ -13,102 +13,228 @@ public class PriceTransmissionService {
     private final JdbcTemplate jdbcTemplate;
     
     public Map<String, Object> calculatePriceTransmission(String instanceId, Double latestPrice, Integer depth) {
+        return calculatePriceTransmission("lithium_carbonate", instanceId, null, latestPrice, null, depth, "downstream");
+    }
+
+    public Map<String, Object> calculatePriceTransmission(
+            String sourceObjectTypeId,
+            String sourceInstanceId,
+            Double priceChangePercent,
+            Double latestPrice,
+            Double previousPrice,
+            Integer depth,
+            String direction) {
         try {
-            // 1. 查询源实例（碳酸锂）信息
-            Map<String, Object> sourceInstance = querySourceInstance(instanceId);
-            if (sourceInstance == null) {
-                return Map.of("success", false, "error", "Instance not found: " + instanceId);
+            String normalizedDirection = (direction == null || direction.isBlank())
+                    ? "downstream"
+                    : direction.trim().toLowerCase();
+            if (!"downstream".equals(normalizedDirection)) {
+                return Map.of("success", false, "error", "当前实例层价格传导第一版仅支持 direction=downstream");
             }
-            
-            Double previousPrice = ((Number) sourceInstance.get("price")).doubleValue();
-            String instanceName = (String) sourceInstance.get("name");
-            
-            // 2. 计算价格变化百分比和传导系数
-            double priceChangePercent = ((latestPrice - previousPrice) / previousPrice) * 100;
-            double transmissionCoefficient = priceChangePercent * 0.9;
-            
-            // 3. 递归查询关系图谱
-            Map<String, Object> relationGraph = queryRelationGraph("lithium_carbonate", instanceId, depth);
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> nodes = (List<Map<String, Object>>) relationGraph.get("nodes");
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> links = (List<Map<String, Object>>) relationGraph.get("links");
-            
-            // 4. 计算各关联实例的新价格
+
+            Map<String, InstanceObjectTypeMeta> objectTypeMeta = queryInstanceObjectTypeMeta();
+            InstanceObjectTypeMeta sourceMeta = objectTypeMeta.get(sourceObjectTypeId);
+            if (sourceMeta == null) {
+                return Map.of("success", false, "error", "Object type not found: " + sourceObjectTypeId);
+            }
+
+            Map<String, Object> sourceInstance = queryInstanceRow(sourceMeta, sourceInstanceId);
+            if (sourceInstance == null) {
+                return Map.of("success", false, "error", "Instance not found: " + sourceObjectTypeId + ":" + sourceInstanceId);
+            }
+
+            double sourcePreviousPrice = isPositive(previousPrice)
+                    ? previousPrice
+                    : numberOrZero(sourceInstance.get("price"));
+
+            double sourcePriceChangePercent;
+            double sourceLatestPrice;
+            if (priceChangePercent != null) {
+                sourcePriceChangePercent = priceChangePercent;
+                sourceLatestPrice = isPositive(latestPrice)
+                        ? latestPrice
+                        : (sourcePreviousPrice > 0 ? applyChange(sourcePreviousPrice, sourcePriceChangePercent) : 0);
+            } else {
+                if (latestPrice == null || latestPrice <= 0) {
+                    return Map.of("success", false, "error", "priceChangePercent is required");
+                }
+                if (sourcePreviousPrice <= 0) {
+                    return Map.of("success", false, "error", "Source instance price must be positive when priceChangePercent is not provided");
+                }
+                sourceLatestPrice = latestPrice;
+                sourcePriceChangePercent = ((sourceLatestPrice - sourcePreviousPrice) / sourcePreviousPrice) * 100;
+            }
+            if (sourcePreviousPrice <= 0 && sourceLatestPrice <= 0) {
+                return Map.of("success", false, "error", "Source instance price must be positive");
+            }
+
+            Map<String, Integer> depthByNode = new LinkedHashMap<>();
+            Map<String, List<String>> pathByNode = new LinkedHashMap<>();
+            Queue<InstanceTraversalNode> queue = new LinkedList<>();
+            List<Map<String, Object>> nodes = new ArrayList<>();
+            List<Map<String, Object>> edges = new ArrayList<>();
+            List<Map<String, Object>> paths = new ArrayList<>();
+            Set<String> visitedEdges = new HashSet<>();
+
+            String sourceNodeId = nodeId(sourceObjectTypeId, sourceInstanceId);
+            depthByNode.put(sourceNodeId, 0);
+            pathByNode.put(sourceNodeId, List.of(sourceNodeId));
+            queue.offer(new InstanceTraversalNode(sourceObjectTypeId, sourceInstanceId, 0));
+
+            nodes.add(buildInstanceTransmissionNode(
+                    sourceMeta,
+                    sourceInstance,
+                    sourceInstanceId,
+                    sourcePreviousPrice,
+                    sourceLatestPrice,
+                    sourcePriceChangePercent,
+                    0
+            ));
+
+            while (!queue.isEmpty()) {
+                InstanceTraversalNode current = queue.poll();
+                if (current.depth() >= depth) continue;
+
+                List<Map<String, Object>> relations = queryPriceTransmissionInstanceRelations(
+                        current.objectTypeId(),
+                        current.instanceId()
+                );
+                for (Map<String, Object> relation : relations) {
+                    String linkTypeId = (String) relation.get("linkTypeId");
+                    String sourceTypeId = (String) relation.get("sourceObjectId");
+                    String targetTypeId = (String) relation.get("targetObjectId");
+                    String relationSourceInstanceId = (String) relation.get("sourceInstanceId");
+                    String relationTargetInstanceId = (String) relation.get("targetInstanceId");
+
+                    boolean currentIsSource = current.objectTypeId().equals(sourceTypeId)
+                            && current.instanceId().equals(relationSourceInstanceId);
+                    boolean currentIsTarget = current.objectTypeId().equals(targetTypeId)
+                            && current.instanceId().equals(relationTargetInstanceId);
+                    if (!currentIsSource && !currentIsTarget) continue;
+
+                    String nextObjectTypeId = currentIsSource ? targetTypeId : sourceTypeId;
+                    String nextInstanceId = currentIsSource ? relationTargetInstanceId : relationSourceInstanceId;
+                    InstanceObjectTypeMeta nextMeta = objectTypeMeta.get(nextObjectTypeId);
+                    if (nextMeta == null) continue;
+
+                    int nextDepth = current.depth() + 1;
+                    String currentNodeId = nodeId(current.objectTypeId(), current.instanceId());
+                    String nextNodeId = nodeId(nextObjectTypeId, nextInstanceId);
+                    Integer knownDepth = depthByNode.get(nextNodeId);
+                    if (knownDepth == null) {
+                        Map<String, Object> nextRow = queryInstanceRow(nextMeta, nextInstanceId);
+                        if (nextRow == null) continue;
+
+                        double nextPreviousPrice = numberOrZero(nextRow.get("price"));
+                        if (nextPreviousPrice <= 0) continue;
+
+                        double edgeCoefficient = 0.5;
+                        double depthDecay = Math.pow(0.8, Math.max(0, nextDepth - 1));
+                        double impactPercent = sourcePriceChangePercent * edgeCoefficient * depthDecay;
+                        double nextLatestPrice = applyChange(nextPreviousPrice, impactPercent);
+
+                        depthByNode.put(nextNodeId, nextDepth);
+                        pathByNode.put(nextNodeId, appendPath(pathByNode.get(currentNodeId), nextNodeId));
+                        queue.offer(new InstanceTraversalNode(nextObjectTypeId, nextInstanceId, nextDepth));
+                        nodes.add(buildInstanceTransmissionNode(
+                                nextMeta,
+                                nextRow,
+                                nextInstanceId,
+                                nextPreviousPrice,
+                                nextLatestPrice,
+                                impactPercent,
+                                nextDepth
+                        ));
+                    } else if (knownDepth != nextDepth) {
+                        continue;
+                    }
+
+                    String edgeKey = relation.get("id") + ":" + currentNodeId + ">" + nextNodeId;
+                    if (visitedEdges.add(edgeKey)) {
+                        double edgeCoefficient = 0.5;
+                        double depthDecay = Math.pow(0.8, Math.max(0, nextDepth - 1));
+                        double impactPercent = sourcePriceChangePercent * edgeCoefficient * depthDecay;
+                        List<String> pathNodeIds = appendPath(pathByNode.get(currentNodeId), nextNodeId);
+
+                        edges.add(buildInstanceTransmissionEdge(
+                                currentNodeId,
+                                nextNodeId,
+                                relation,
+                                edgeCoefficient,
+                                depthDecay,
+                                round(impactPercent, 2)
+                        ));
+                        paths.add(buildInstanceTransmissionPath(
+                                pathNodeIds,
+                                relation,
+                                nextDepth,
+                                edgeCoefficient,
+                                depthDecay,
+                                round(impactPercent, 2)
+                        ));
+                    }
+                }
+            }
+
             List<Map<String, Object>> affectedInstances = new ArrayList<>();
             double totalPriceChangeAmount = 0;
-            
-            // 构建节点深度映射
-            Map<String, Integer> nodeDepthMap = new HashMap<>();
-            for (Map<String, Object> node : nodes) {
-                String nodeId = (String) node.get("id");
-                Integer nodeDepth = (Integer) node.get("depth");
-                nodeDepthMap.put(nodeId, nodeDepth);
-            }
-            
-            // 排除源实例，计算其他实例
-            String sourceNodeId = "lithium_carbonate:" + instanceId;
             for (Map<String, Object> node : nodes) {
                 String nodeId = (String) node.get("id");
                 if (nodeId.equals(sourceNodeId)) continue;
-                
-                String objectTypeId = (String) node.get("objectTypeId");
-                String instanceIdInNode = (String) node.get("instanceId");
-                String objectTypeName = (String) node.get("objectTypeName");
-                String label = (String) node.get("label");
-                Integer nodeDepth = nodeDepthMap.getOrDefault(nodeId, 1);
-                
-                // 查询该实例当前价格
-                Double instancePreviousPrice = queryInstancePrice(objectTypeId, instanceIdInNode);
-                if (instancePreviousPrice == null) continue;
-                
-                // 计算衰减后的传导系数（每层衰减20%）
-                double depthDecay = Math.pow(0.8, nodeDepth);
-                double instanceCoefficient = transmissionCoefficient * depthDecay;
-                
-                // 计算新价格
-                double instanceLatestPrice = instancePreviousPrice * (1 + instanceCoefficient / 100);
-                double priceChangeAmount = instanceLatestPrice - instancePreviousPrice;
-                
-                // 构建关系路径
-                String relationPath = buildRelationPath(sourceNodeId, nodeId, links, nodeDepthMap);
-                
+
+                double nodePreviousPrice = numberOrZero(node.get("previousPrice"));
+                double nodeLatestPrice = numberOrZero(node.get("latestPrice"));
+                double priceChangeAmount = nodeLatestPrice - nodePreviousPrice;
                 Map<String, Object> affectedInstance = new LinkedHashMap<>();
-                affectedInstance.put("id", instanceIdInNode);
-                affectedInstance.put("objectTypeId", objectTypeId);
-                affectedInstance.put("objectTypeName", objectTypeName);
-                affectedInstance.put("name", label);
-                affectedInstance.put("relationPath", relationPath);
-                affectedInstance.put("relationDepth", nodeDepth);
-                affectedInstance.put("previousPrice", round(instancePreviousPrice, 2));
-                affectedInstance.put("transmissionCoefficient", round(instanceCoefficient, 2));
-                affectedInstance.put("latestPrice", round(instanceLatestPrice, 2));
+                affectedInstance.put("id", node.get("instanceId"));
+                affectedInstance.put("objectTypeId", node.get("objectTypeId"));
+                affectedInstance.put("objectTypeName", node.get("objectTypeName"));
+                affectedInstance.put("name", node.get("name"));
+                affectedInstance.put("relationPath", String.join(" → ", pathByNode.getOrDefault(nodeId, List.of(nodeId))));
+                affectedInstance.put("relationDepth", node.get("depth"));
+                affectedInstance.put("previousPrice", node.get("previousPrice"));
+                affectedInstance.put("transmissionCoefficient", node.get("priceChangePercent"));
+                affectedInstance.put("latestPrice", node.get("latestPrice"));
                 affectedInstance.put("priceChangeAmount", round(priceChangeAmount, 2));
-                
+
                 affectedInstances.add(affectedInstance);
                 totalPriceChangeAmount += priceChangeAmount;
             }
-            
-            // 5. 组装返回结果
+
             Map<String, Object> sourceResult = new LinkedHashMap<>();
-            sourceResult.put("id", instanceId);
-            sourceResult.put("name", instanceName);
-            sourceResult.put("previousPrice", round(previousPrice, 2));
-            sourceResult.put("latestPrice", round(latestPrice, 2));
-            sourceResult.put("priceChangePercent", round(priceChangePercent, 2));
-            
+            sourceResult.put("id", sourceInstanceId);
+            sourceResult.put("objectTypeId", sourceObjectTypeId);
+            sourceResult.put("objectTypeName", sourceMeta.name());
+            sourceResult.put("instanceId", sourceInstanceId);
+            sourceResult.put("name", resolveInstanceName(sourceInstance, sourceInstanceId));
+            sourceResult.put("previousPrice", round(sourcePreviousPrice, 2));
+            sourceResult.put("latestPrice", round(sourceLatestPrice, 2));
+            sourceResult.put("priceChangePercent", round(sourcePriceChangePercent, 2));
+
             Map<String, Object> summary = new LinkedHashMap<>();
+            summary.put("instanceCount", nodes.size());
+            summary.put("edgeCount", edges.size());
+            summary.put("pathCount", paths.size());
+            summary.put("depth", depth);
+            summary.put("sourceObjectTypeId", sourceObjectTypeId);
+            summary.put("sourceInstanceId", sourceInstanceId);
+            summary.put("direction", normalizedDirection);
+            summary.put("edgeCoefficient", 0.5);
+            summary.put("depthDecay", 0.8);
             summary.put("totalAffectedInstances", affectedInstances.size());
             summary.put("totalPriceChangeAmount", round(totalPriceChangeAmount, 2));
-            
+
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("sourceInstance", sourceResult);
-            data.put("transmissionCoefficient", round(transmissionCoefficient, 2));
+            data.put("nodes", nodes);
+            data.put("edges", edges);
+            data.put("paths", paths);
+            data.put("transmissionCoefficient", round(sourcePriceChangePercent * 0.5, 2));
             data.put("affectedInstances", affectedInstances);
             data.put("summary", summary);
-            
+
             return Map.of("success", true, "data", data);
-            
+
         } catch (Exception e) {
             return Map.of("success", false, "error", e.getMessage());
         }
@@ -118,49 +244,125 @@ public class PriceTransmissionService {
             String objectTypeId,
             Double priceChangePercent,
             Integer depth,
+            String direction,
             Double previousPrice,
             Double latestPrice) {
-        if (!"lithium_carbonate".equals(objectTypeId)) {
-            return Map.of("success", false, "error", "当前仅支持 lithium_carbonate 的对象类型层价格传导分析");
+        String normalizedDirection = (direction == null || direction.isBlank())
+                ? "downstream"
+                : direction.trim().toLowerCase();
+        if (!"downstream".equals(normalizedDirection)) {
+            return Map.of("success", false, "error", "当前概念层价格传导第一版仅支持 direction=downstream");
+        }
+
+        Map<String, Map<String, Object>> objectTypeMeta = queryObjectTypeMeta();
+        Map<String, Object> sourceMeta = objectTypeMeta.get(objectTypeId);
+        if (sourceMeta == null) {
+            return Map.of("success", false, "error", "Object type not found: " + objectTypeId);
+        }
+
+        Map<String, Integer> depthByObjectType = new LinkedHashMap<>();
+        Queue<String> queue = new LinkedList<>();
+        List<Map<String, Object>> edges = new ArrayList<>();
+        List<Map<String, Object>> paths = new ArrayList<>();
+        Set<String> visitedEdges = new HashSet<>();
+        Map<String, List<String>> pathByObjectType = new LinkedHashMap<>();
+
+        depthByObjectType.put(objectTypeId, 0);
+        pathByObjectType.put(objectTypeId, List.of(objectTypeId));
+        queue.offer(objectTypeId);
+
+        while (!queue.isEmpty()) {
+            String currentObjectTypeId = queue.poll();
+            int currentDepth = depthByObjectType.get(currentObjectTypeId);
+            if (currentDepth >= depth) continue;
+
+            List<Map<String, Object>> linkTypes = queryPriceTransmissionLinkTypes(currentObjectTypeId);
+            for (Map<String, Object> linkType : linkTypes) {
+                String sourceId = (String) linkType.get("sourceObjectId");
+                String targetId = (String) linkType.get("targetObjectId");
+                String nextObjectTypeId = currentObjectTypeId.equals(sourceId) ? targetId : sourceId;
+                if (nextObjectTypeId == null || nextObjectTypeId.equals(currentObjectTypeId)) continue;
+                if (!objectTypeMeta.containsKey(nextObjectTypeId)) continue;
+
+                int nextDepth = currentDepth + 1;
+                Integer knownDepth = depthByObjectType.get(nextObjectTypeId);
+                if (knownDepth == null) {
+                    depthByObjectType.put(nextObjectTypeId, nextDepth);
+                    pathByObjectType.put(nextObjectTypeId, appendPath(pathByObjectType.get(currentObjectTypeId), nextObjectTypeId));
+                    queue.offer(nextObjectTypeId);
+                } else if (knownDepth != nextDepth) {
+                    continue;
+                }
+
+                String edgeKey = linkType.get("id") + ":" + currentObjectTypeId + ">" + nextObjectTypeId;
+                if (visitedEdges.add(edgeKey)) {
+                    double edgeCoefficient = 0.5;
+                    double depthDecay = Math.pow(0.8, Math.max(0, nextDepth - 1));
+                    double impactPercent = priceChangePercent * edgeCoefficient * depthDecay;
+                    List<String> pathObjectTypeIds = appendPath(pathByObjectType.get(currentObjectTypeId), nextObjectTypeId);
+                    edges.add(buildObjectTypeEdge(
+                            currentObjectTypeId,
+                            nextObjectTypeId,
+                            (String) linkType.get("id"),
+                            (String) linkType.get("name"),
+                            edgeCoefficient,
+                            depthDecay,
+                            round(impactPercent, 2)
+                    ));
+                    paths.add(buildObjectTypePath(
+                            pathObjectTypeIds,
+                            linkType,
+                            nextDepth,
+                            edgeCoefficient,
+                            depthDecay,
+                            round(impactPercent, 2)
+                    ));
+                }
+            }
         }
 
         List<Map<String, Object>> nodes = new ArrayList<>();
-        List<Map<String, Object>> edges = new ArrayList<>();
-
-        double sourcePreviousPrice = isPositive(previousPrice)
-                ? previousPrice
-                : medianPriceOrDefault("lithium_carbonate", 12.50);
-        double sourceLatestPrice = isPositive(latestPrice)
-                ? latestPrice
-                : sourcePreviousPrice * (1 + priceChangePercent / 100);
-        double cathodeMedianPrice = medianPriceOrDefault("cathode_material", 8.40);
-        double electrolyteMedianPrice = medianPriceOrDefault("battery_electrolyte", 6.50);
-        double batteryCellMedianPrice = medianPriceOrDefault("battery_cell", 1.12);
-        double powerBatteryMedianPrice = medianPriceOrDefault("power_battery", 4.80);
-        double newEnergyVehicleMedianPrice = medianPriceOrDefault("new_energy_vehicle", 18.60);
-
-        nodes.add(buildObjectTypeNode("lithium_carbonate", "碳酸锂", "L1 / 原材料", sourcePreviousPrice, sourceLatestPrice, 0));
-        nodes.add(buildObjectTypeNode("cathode_material", "正极材料", "L2 / 正极材料", cathodeMedianPrice, applyChange(cathodeMedianPrice, priceChangePercent * 0.33), 1));
-        nodes.add(buildObjectTypeNode("battery_electrolyte", "电池电解液", "L2 / 电池电解液", electrolyteMedianPrice, applyChange(electrolyteMedianPrice, priceChangePercent * 0.57), 1));
-        nodes.add(buildObjectTypeNode("battery_cell", "电芯", "L3 / 电芯", batteryCellMedianPrice, applyChange(batteryCellMedianPrice, priceChangePercent * 0.46), 2));
-        nodes.add(buildObjectTypeNode("power_battery", "电池", "L4 / 电池", powerBatteryMedianPrice, applyChange(powerBatteryMedianPrice, priceChangePercent * 0.28), 3));
-        nodes.add(buildObjectTypeNode("new_energy_vehicle", "新能源汽车", "L5 / 新能源整车", newEnergyVehicleMedianPrice, applyChange(newEnergyVehicleMedianPrice, priceChangePercent * 0.11), 4));
-
-        edges.add(buildObjectTypeEdge("lithium_carbonate", "cathode_material", round(priceChangePercent * 0.33, 2)));
-        edges.add(buildObjectTypeEdge("lithium_carbonate", "battery_electrolyte", round(priceChangePercent * 0.57, 2)));
-        edges.add(buildObjectTypeEdge("cathode_material", "battery_cell", round(priceChangePercent * 0.30, 2)));
-        edges.add(buildObjectTypeEdge("battery_electrolyte", "battery_cell", round(priceChangePercent * 0.32, 2)));
-        edges.add(buildObjectTypeEdge("battery_cell", "power_battery", round(priceChangePercent * 0.28, 2)));
-        edges.add(buildObjectTypeEdge("power_battery", "new_energy_vehicle", round(priceChangePercent * 0.11, 2)));
+        for (Map.Entry<String, Integer> entry : depthByObjectType.entrySet()) {
+            String currentObjectTypeId = entry.getKey();
+            int nodeDepth = entry.getValue();
+            Map<String, Object> meta = objectTypeMeta.get(currentObjectTypeId);
+            String tableName = (String) meta.get("backingDataset");
+            String objectTypeName = (String) meta.get("name");
+            double baselinePrice = currentObjectTypeId.equals(objectTypeId) && isPositive(previousPrice)
+                    ? previousPrice
+                    : medianPriceOrDefault(tableName, defaultPriceForObjectType(currentObjectTypeId));
+            double nodeImpactPercent = nodeDepth == 0
+                    ? priceChangePercent
+                    : priceChangePercent * 0.5 * Math.pow(0.8, Math.max(0, nodeDepth - 1));
+            double nodeLatestPrice = currentObjectTypeId.equals(objectTypeId) && isPositive(latestPrice)
+                    ? latestPrice
+                    : applyChange(baselinePrice, nodeImpactPercent);
+            nodes.add(buildObjectTypeNode(
+                    currentObjectTypeId,
+                    objectTypeName,
+                    "L" + (nodeDepth + 1) + " / " + objectTypeName,
+                    baselinePrice,
+                    nodeLatestPrice,
+                    nodeImpactPercent,
+                    nodeDepth
+            ));
+        }
 
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("objectTypeCount", nodes.size());
         summary.put("edgeCount", edges.size());
+        summary.put("pathCount", paths.size());
         summary.put("depth", depth);
+        summary.put("sourceObjectTypeId", objectTypeId);
+        summary.put("direction", normalizedDirection);
+        summary.put("edgeCoefficient", 0.5);
+        summary.put("depthDecay", 0.8);
 
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("objectTypeId", objectTypeId);
-        source.put("objectTypeName", "碳酸锂");
+        source.put("objectTypeName", sourceMeta.get("name"));
+        double sourcePreviousPrice = nodes.isEmpty() ? 0 : ((Number) nodes.get(0).get("previousPrice")).doubleValue();
+        double sourceLatestPrice = nodes.isEmpty() ? 0 : ((Number) nodes.get(0).get("latestPrice")).doubleValue();
         source.put("previousPrice", round(sourcePreviousPrice, 2));
         source.put("latestPrice", round(sourceLatestPrice, 2));
         source.put("priceChangePercent", round(priceChangePercent, 2));
@@ -169,6 +371,7 @@ public class PriceTransmissionService {
         data.put("sourceObjectType", source);
         data.put("nodes", nodes);
         data.put("edges", edges);
+        data.put("paths", paths);
         data.put("summary", summary);
 
         return Map.of("success", true, "data", data);
@@ -193,6 +396,174 @@ public class PriceTransmissionService {
             return null;
         }
     }
+
+    private Map<String, InstanceObjectTypeMeta> queryInstanceObjectTypeMeta() {
+        String sql = """
+                SELECT ot.id,
+                       ot.name,
+                       ot.backing_dataset AS backingDataset,
+                       COALESCE(pk.base_column, 'unique_id') AS primaryKeyColumn
+                FROM object_types ot
+                LEFT JOIN properties pk
+                  ON pk.object_type_id = ot.id
+                 AND pk.is_primary_key = 1
+                """;
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+        Map<String, InstanceObjectTypeMeta> result = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String id = (String) row.get("id");
+            result.put(id, new InstanceObjectTypeMeta(
+                    id,
+                    (String) row.get("name"),
+                    (String) row.get("backingDataset"),
+                    (String) row.get("primaryKeyColumn")
+            ));
+        }
+        return result;
+    }
+
+    private Map<String, Object> queryInstanceRow(InstanceObjectTypeMeta meta, String instanceId) {
+        if (meta == null || meta.backingDataset() == null || meta.backingDataset().isBlank()) {
+            return null;
+        }
+        String sql = String.format(
+                "SELECT * FROM `%s` WHERE `%s` = ? LIMIT 1",
+                safeIdentifier(meta.backingDataset()),
+                safeIdentifier(meta.primaryKeyColumn())
+        );
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, instanceId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private List<Map<String, Object>> queryPriceTransmissionInstanceRelations(String objectTypeId, String instanceId) {
+        String sql = """
+                SELECT lid.id,
+                       lid.link_type_id AS linkTypeId,
+                       lid.source_instance_id AS sourceInstanceId,
+                       lid.target_instance_id AS targetInstanceId,
+                       lt.name AS linkTypeName,
+                       lt.source_object_id AS sourceObjectId,
+                       lt.target_object_id AS targetObjectId
+                FROM link_instance_data lid
+                JOIN link_types lt ON lt.id COLLATE utf8mb4_unicode_ci = lid.link_type_id
+                WHERE (lid.source_instance_id = ? OR lid.target_instance_id = ?)
+                  AND LOWER(COALESCE(lt.status, 'active')) IN ('active', 'pending')
+                  AND lt.source_object_id NOT IN ('company_entity', 'event_entity')
+                  AND lt.target_object_id NOT IN ('company_entity', 'event_entity')
+                  AND (
+                    (lt.source_object_id = ? AND lid.source_instance_id = ?)
+                    OR
+                    (lt.target_object_id = ? AND lid.target_instance_id = ?)
+                  )
+                ORDER BY lid.id
+                """;
+        return jdbcTemplate.queryForList(sql, instanceId, instanceId, objectTypeId, instanceId, objectTypeId, instanceId);
+    }
+
+    private Map<String, Object> buildInstanceTransmissionNode(
+            InstanceObjectTypeMeta meta,
+            Map<String, Object> row,
+            String instanceId,
+            double previousPrice,
+            double latestPrice,
+            double changePercent,
+            int depth) {
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("id", nodeId(meta.id(), instanceId));
+        node.put("objectTypeId", meta.id());
+        node.put("objectTypeName", meta.name());
+        node.put("instanceId", instanceId);
+        node.put("name", resolveInstanceName(row, instanceId));
+        node.put("label", resolveInstanceName(row, instanceId));
+        node.put("previousPrice", round(previousPrice, 2));
+        node.put("latestPrice", round(latestPrice, 2));
+        node.put("priceChangePercent", round(changePercent, 2));
+        node.put("changePercent", round(changePercent, 2));
+        node.put("depth", depth);
+        node.put("data", row);
+        return node;
+    }
+
+    private Map<String, Object> buildInstanceTransmissionEdge(
+            String source,
+            String target,
+            Map<String, Object> relation,
+            double edgeCoefficient,
+            double depthDecay,
+            double impactPercent) {
+        Map<String, Object> edge = new LinkedHashMap<>();
+        edge.put("source", source);
+        edge.put("target", target);
+        edge.put("linkInstanceId", String.valueOf(relation.get("id")));
+        edge.put("linkTypeId", relation.get("linkTypeId"));
+        edge.put("linkTypeName", relation.get("linkTypeName"));
+        edge.put("transmissionCoefficient", round(edgeCoefficient, 2));
+        edge.put("edgeCoefficient", round(edgeCoefficient, 2));
+        edge.put("depthDecay", round(depthDecay, 2));
+        edge.put("impactPercent", impactPercent);
+        edge.put("coefficient", impactPercent);
+        edge.put("label", "影响 " + (impactPercent >= 0 ? "+" : "") + round(impactPercent, 2) + "%");
+        return edge;
+    }
+
+    private Map<String, Object> buildInstanceTransmissionPath(
+            List<String> instanceNodeIds,
+            Map<String, Object> terminalRelation,
+            int depth,
+            double edgeCoefficient,
+            double depthDecay,
+            double impactPercent) {
+        Map<String, Object> path = new LinkedHashMap<>();
+        path.put("instanceIds", instanceNodeIds);
+        path.put("terminalLinkInstanceId", String.valueOf(terminalRelation.get("id")));
+        path.put("terminalLinkTypeId", terminalRelation.get("linkTypeId"));
+        path.put("terminalLinkTypeName", terminalRelation.get("linkTypeName"));
+        path.put("depth", depth);
+        path.put("transmissionCoefficient", round(edgeCoefficient, 2));
+        path.put("depthDecay", round(depthDecay, 2));
+        path.put("impactPercent", impactPercent);
+        return path;
+    }
+
+    private String nodeId(String objectTypeId, String instanceId) {
+        return objectTypeId + ":" + instanceId;
+    }
+
+    private String resolveInstanceName(Map<String, Object> row, String fallback) {
+        if (row == null) return fallback;
+        for (String key : List.of("name", "material_name", "model_name", "model", "grade", "manufacturer")) {
+            Object value = row.get(key);
+            if (value != null && !String.valueOf(value).isBlank()) {
+                return String.valueOf(value);
+            }
+        }
+        return fallback;
+    }
+
+    private double numberOrZero(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value instanceof String stringValue) {
+            try {
+                return Double.parseDouble(stringValue);
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    private String safeIdentifier(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9_]+")) {
+            throw new IllegalArgumentException("Unsafe SQL identifier: " + value);
+        }
+        return value;
+    }
+
+    private record InstanceObjectTypeMeta(String id, String name, String backingDataset, String primaryKeyColumn) {}
+
+    private record InstanceTraversalNode(String objectTypeId, String instanceId, int depth) {}
     
     private Map<String, Object> queryRelationGraph(String objectTypeId, String instanceId, int depth) {
         // 使用递归查询获取关系图谱
@@ -389,6 +760,9 @@ public class PriceTransmissionService {
 
     private double medianPriceOrDefault(String tableName, double defaultValue) {
         try {
+            if (tableName == null || tableName.isBlank()) {
+                return defaultValue;
+            }
             String sql = String.format(
                     "SELECT price FROM %s WHERE price IS NOT NULL AND price > 0 ORDER BY price ASC",
                     tableName
@@ -415,15 +789,24 @@ public class PriceTransmissionService {
         }
     }
 
-    private Map<String, Object> buildObjectTypeNode(String id, String name, String subtitle, double previousPrice, double latestPrice, int level) {
+    private Map<String, Object> buildObjectTypeNode(
+            String id,
+            String name,
+            String subtitle,
+            double previousPrice,
+            double latestPrice,
+            double changePercent,
+            int depth) {
         Map<String, Object> node = new LinkedHashMap<>();
         node.put("id", id);
         node.put("name", name);
         node.put("subtitle", subtitle);
         node.put("previousPrice", round(previousPrice, 2));
         node.put("latestPrice", round(latestPrice, 2));
-        node.put("priceChangePercent", round(((latestPrice - previousPrice) / previousPrice) * 100, 2));
-        node.put("level", level);
+        node.put("priceChangePercent", round(changePercent, 2));
+        node.put("changePercent", round(changePercent, 2));
+        node.put("level", subtitle);
+        node.put("depth", depth);
         return node;
     }
 
@@ -434,5 +817,95 @@ public class PriceTransmissionService {
         edge.put("coefficient", coefficient);
         edge.put("label", "传导系数 " + (coefficient >= 0 ? "+" : "") + round(coefficient, 2) + "%");
         return edge;
+    }
+
+    private Map<String, Object> buildObjectTypeEdge(
+            String source,
+            String target,
+            String linkTypeId,
+            String linkTypeName,
+            double edgeCoefficient,
+            double depthDecay,
+            double impactPercent) {
+        Map<String, Object> edge = new LinkedHashMap<>();
+        edge.put("source", source);
+        edge.put("target", target);
+        edge.put("linkTypeId", linkTypeId);
+        edge.put("linkTypeName", linkTypeName);
+        edge.put("transmissionCoefficient", round(edgeCoefficient, 2));
+        edge.put("edgeCoefficient", round(edgeCoefficient, 2));
+        edge.put("depthDecay", round(depthDecay, 2));
+        edge.put("impactPercent", impactPercent);
+        edge.put("coefficient", impactPercent);
+        edge.put("label", "影响 " + (impactPercent >= 0 ? "+" : "") + round(impactPercent, 2) + "%");
+        return edge;
+    }
+
+    private Map<String, Object> buildObjectTypePath(
+            List<String> objectTypeIds,
+            Map<String, Object> terminalLinkType,
+            int depth,
+            double edgeCoefficient,
+            double depthDecay,
+            double impactPercent) {
+        Map<String, Object> path = new LinkedHashMap<>();
+        path.put("objectTypeIds", objectTypeIds);
+        path.put("terminalLinkTypeId", terminalLinkType.get("id"));
+        path.put("terminalLinkTypeName", terminalLinkType.get("name"));
+        path.put("depth", depth);
+        path.put("transmissionCoefficient", round(edgeCoefficient, 2));
+        path.put("depthDecay", round(depthDecay, 2));
+        path.put("impactPercent", impactPercent);
+        return path;
+    }
+
+    private List<String> appendPath(List<String> path, String nextObjectTypeId) {
+        List<String> nextPath = new ArrayList<>();
+        if (path != null) {
+            nextPath.addAll(path);
+        }
+        nextPath.add(nextObjectTypeId);
+        return nextPath;
+    }
+
+    private Map<String, Map<String, Object>> queryObjectTypeMeta() {
+        String sql = """
+                SELECT id, name, backing_dataset AS backingDataset
+                FROM object_types
+                """;
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            result.put((String) row.get("id"), row);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> queryPriceTransmissionLinkTypes(String objectTypeId) {
+        String sql = """
+                SELECT id,
+                       name,
+                       source_object_id AS sourceObjectId,
+                       target_object_id AS targetObjectId
+                FROM link_types
+                WHERE (source_object_id = ? OR target_object_id = ?)
+                  AND LOWER(COALESCE(status, 'active')) IN ('active', 'pending')
+                  AND source_object_id NOT IN ('company_entity', 'event_entity')
+                  AND target_object_id NOT IN ('company_entity', 'event_entity')
+                ORDER BY id
+                """;
+        return jdbcTemplate.queryForList(sql, objectTypeId, objectTypeId);
+    }
+
+    private double defaultPriceForObjectType(String objectTypeId) {
+        return switch (objectTypeId) {
+            case "lithium_carbonate" -> 12.55;
+            case "cathode_material" -> 8.40;
+            case "battery_electrolyte" -> 6.50;
+            case "battery_cell" -> 1.12;
+            case "power_battery" -> 4.80;
+            case "new_energy_vehicle" -> 18.60;
+            default -> 1.00;
+        };
     }
 }

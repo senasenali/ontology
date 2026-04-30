@@ -11,6 +11,9 @@ import java.util.List;
 @Mapper
 public interface ObjectTypeMapper extends BaseMapper<ObjectType> {
     
+    @Select("SELECT * FROM object_types WHERE project_id = #{projectId} ORDER BY name")
+    List<ObjectType> selectAllOrdered(@Param("projectId") String projectId);
+
     @Select("SELECT * FROM object_types ORDER BY name")
     List<ObjectType> selectAllOrdered();
     

@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>本体论：把行业理解变成可计算结构</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ===========================================
+         CSS CUSTOM PROPERTIES (THEME)
+         =========================================== */
+      :root {
+        --bg-primary: #11120f;
+        --bg-secondary: #191a15;
+        --paper: #f4efdf;
+        --muted: #c7bfaa;
+        --ink-soft: rgba(244, 239, 223, 0.76);
+        --line: rgba(244, 239, 223, 0.17);
+        --accent: #7dff9a;
+        --accent-2: #ffbd59;
+        --accent-3: #70c7ff;
+        --danger: #ff6b67;
+        --panel: rgba(244, 239, 223, 0.07);
+        --panel-strong: rgba(244, 239, 223, 0.12);
+        --shadow: rgba(0, 0, 0, 0.38);
+        --font-display: "Noto Serif SC", serif;
+        --font-body: "IBM Plex Sans SC", sans-serif;
+        --title-size: clamp(1.6rem, 4.8vw, 4.45rem);
+        --h2-size: clamp(1.28rem, 3.4vw, 2.8rem);
+        --h3-size: clamp(0.95rem, 2vw, 1.35rem);
+        --body-size: clamp(0.78rem, 1.28vw, 1.08rem);
+        --small-size: clamp(0.64rem, 0.95vw, 0.86rem);
+        --slide-padding: clamp(1rem, 4vw, 4rem);
+        --content-gap: clamp(0.65rem, 1.8vw, 1.55rem);
+        --element-gap: clamp(0.36rem, 0.9vw, 0.78rem);
+        --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+        --duration-normal: 0.72s;
+      }
+
+      /* ===========================================
+         BASE STYLES
+         =========================================== */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      /* ===========================================
+         VIEWPORT FITTING: MANDATORY BASE STYLES
+         Include this ENTIRE file in every presentation.
+         These styles ensure slides fit exactly in the viewport.
+         =========================================== */
+
+      /* 1. Lock html/body to viewport */
+      html, body {
+          height: 100%;
+          overflow-x: hidden;
+      }
+
+      html {
+          scroll-snap-type: y mandatory;
+          scroll-behavior: smooth;
+      }
+
+      /* 2. Each slide = exact viewport height */
+      .slide {
+          width: 100vw;
+          height: 100vh;
+          height: 100dvh; /* Dynamic viewport height for mobile browsers */
+          overflow: hidden; /* CRITICAL: Prevent ANY overflow */
+          scroll-snap-align: start;
+          display: flex;
+          flex-direction: column;
+          position: relative;
+      }
+
+      /* 3. Content container with flex for centering */
+      .slide-content {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          max-height: 100%;
+          overflow: hidden; /* Double-protection against overflow */
+          padding: var(--slide-padding);
+      }
+
+      /* 4. ALL typography uses clamp() for responsive scaling */
+      :root {
+          /* Titles scale from mobile to desktop */
+          --title-size: clamp(1.5rem, 5vw, 4rem);
+          --h2-size: clamp(1.25rem, 3.5vw, 2.5rem);
+          --h3-size: clamp(1rem, 2.5vw, 1.75rem);
+
+          /* Body text */
+          --body-size: clamp(0.75rem, 1.5vw, 1.125rem);
+          --small-size: clamp(0.65rem, 1vw, 0.875rem);
+
+          /* Spacing scales with viewport */
+          --slide-padding: clamp(1rem, 4vw, 4rem);
+          --content-gap: clamp(0.5rem, 2vw, 2rem);
+          --element-gap: clamp(0.25rem, 1vw, 1rem);
+      }
+
+      /* 5. Cards/containers use viewport-relative max sizes */
+      .card, .container, .content-box {
+          max-width: min(90vw, 1000px);
+          max-height: min(80vh, 700px);
+      }
+
+      /* 6. Lists auto-scale with viewport */
+      .feature-list, .bullet-list {
+          gap: clamp(0.4rem, 1vh, 1rem);
+      }
+
+      .feature-list li, .bullet-list li {
+          font-size: var(--body-size);
+          line-height: 1.4;
+      }
+
+      /* 7. Grids adapt to available space */
+      .grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+          gap: clamp(0.5rem, 1.5vw, 1rem);
+      }
+
+      /* 8. Images constrained to viewport */
+      img, .image-container {
+          max-width: 100%;
+          max-height: min(50vh, 400px);
+          object-fit: contain;
+      }
+
+      /* ===========================================
+         RESPONSIVE BREAKPOINTS
+         Aggressive scaling for smaller viewports
+         =========================================== */
+
+      /* Short viewports (< 700px height) */
+      @media (max-height: 700px) {
+          :root {
+              --slide-padding: clamp(0.75rem, 3vw, 2rem);
+              --content-gap: clamp(0.4rem, 1.5vw, 1rem);
+              --title-size: clamp(1.25rem, 4.5vw, 2.5rem);
+              --h2-size: clamp(1rem, 3vw, 1.75rem);
+          }
+      }
+
+      /* Very short viewports (< 600px height) */
+      @media (max-height: 600px) {
+          :root {
+              --slide-padding: clamp(0.5rem, 2.5vw, 1.5rem);
+              --content-gap: clamp(0.3rem, 1vw, 0.75rem);
+              --title-size: clamp(1.1rem, 4vw, 2rem);
+              --body-size: clamp(0.7rem, 1.2vw, 0.95rem);
+          }
+
+          /* Hide non-essential elements */
+          .nav-dots, .keyboard-hint, .decorative {
+              display: none;
+          }
+      }
+
+      /* Extremely short (landscape phones, < 500px height) */
+      @media (max-height: 500px) {
+          :root {
+              --slide-padding: clamp(0.4rem, 2vw, 1rem);
+              --title-size: clamp(1rem, 3.5vw, 1.5rem);
+              --h2-size: clamp(0.9rem, 2.5vw, 1.25rem);
+              --body-size: clamp(0.65rem, 1vw, 0.85rem);
+          }
+      }
+
+      /* Narrow viewports (< 600px width) */
+      @media (max-width: 600px) {
+          :root {
+              --title-size: clamp(1.25rem, 7vw, 2.5rem);
+          }
+
+          /* Stack grids vertically */
+          .grid {
+              grid-template-columns: 1fr;
+          }
+      }
+
+      /* ===========================================
+         REDUCED MOTION
+         Respect user preferences
+         =========================================== */
+      @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+              animation-duration: 0.01ms !important;
+              transition-duration: 0.2s !important;
+          }
+
+          html {
+              scroll-behavior: auto;
+          }
+      }
+
+      /* ===========================================
+         GLOBAL PRESENTATION SURFACE
+         =========================================== */
+      body {
+        color: var(--paper);
+        background:
+          radial-gradient(circle at 14% 20%, rgba(125, 255, 154, 0.15), transparent 28vw),
+          radial-gradient(circle at 86% 74%, rgba(255, 189, 89, 0.13), transparent 30vw),
+          linear-gradient(145deg, #11120f 0%, #181912 50%, #0c0d0b 100%);
+        font-family: var(--font-body);
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(244, 239, 223, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(244, 239, 223, 0.035) 1px, transparent 1px);
+        background-size: clamp(2rem, 5vw, 4rem) clamp(2rem, 5vw, 4rem);
+        mask-image: linear-gradient(to bottom, transparent, black 18%, black 82%, transparent);
+      }
+
+      h1,
+      h2,
+      h3 {
+        font-family: var(--font-display);
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        font-size: var(--title-size);
+        max-width: min(12ch, 86vw);
+      }
+
+      h2 {
+        font-size: var(--h2-size);
+        max-width: min(19ch, 92vw);
+      }
+
+      h3 {
+        font-size: var(--h3-size);
+      }
+
+      p {
+        font-size: var(--body-size);
+        line-height: 1.68;
+        color: var(--ink-soft);
+      }
+
+      strong {
+        color: var(--paper);
+        font-weight: 700;
+      }
+
+      .slide {
+        isolation: isolate;
+      }
+
+      .slide::after {
+        content: "";
+        position: absolute;
+        inset: auto var(--slide-padding) clamp(0.8rem, 2vh, 1.25rem);
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(244, 239, 223, 0.22), transparent);
+        z-index: -1;
+      }
+
+      .slide-content {
+        gap: var(--content-gap);
+        position: relative;
+        z-index: 2;
+      }
+
+      .eyebrow {
+        color: var(--accent);
+        font-size: var(--small-size);
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .kicker {
+        max-width: min(60rem, 88vw);
+        font-size: clamp(0.86rem, 1.45vw, 1.25rem);
+      }
+
+      .accent {
+        color: var(--accent);
+      }
+
+      .amber {
+        color: var(--accent-2);
+      }
+
+      .blue {
+        color: var(--accent-3);
+      }
+
+      /* ===========================================
+         ANIMATIONS
+         =========================================== */
+      .reveal {
+        opacity: 0;
+        transform: translateY(clamp(1rem, 3vh, 2rem));
+        transition:
+          opacity var(--duration-normal) var(--ease-out-expo),
+          transform var(--duration-normal) var(--ease-out-expo);
+      }
+
+      .slide.visible .reveal {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .reveal:nth-child(1) { transition-delay: 0.08s; }
+      .reveal:nth-child(2) { transition-delay: 0.18s; }
+      .reveal:nth-child(3) { transition-delay: 0.28s; }
+      .reveal:nth-child(4) { transition-delay: 0.38s; }
+      .reveal:nth-child(5) { transition-delay: 0.48s; }
+
+      @keyframes pulseNode {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(125, 255, 154, 0.18); }
+        50% { box-shadow: 0 0 0 clamp(0.45rem, 1.2vw, 0.8rem) rgba(125, 255, 154, 0); }
+      }
+
+      @keyframes flow {
+        from { background-position: 0 0; }
+        to { background-position: clamp(2rem, 5vw, 4rem) 0; }
+      }
+
+      /* ===========================================
+         NAVIGATION UI
+         =========================================== */
+      .progress-bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: clamp(0.18rem, 0.4vh, 0.28rem);
+        width: 0%;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
+        z-index: 1000;
+        transition: width 0.24s ease;
+      }
+
+      .nav-dots {
+        position: fixed;
+        right: clamp(0.55rem, 1.6vw, 1.35rem);
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        flex-direction: column;
+        gap: clamp(0.36rem, 1vh, 0.62rem);
+        z-index: 1000;
+      }
+
+      .nav-dot {
+        width: clamp(0.45rem, 0.8vw, 0.62rem);
+        height: clamp(0.45rem, 0.8vw, 0.62rem);
+        border: 1px solid rgba(244, 239, 223, 0.42);
+        border-radius: 50%;
+        background: transparent;
+        cursor: pointer;
+        transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+      }
+
+      .nav-dot.active {
+        transform: scale(1.45);
+        border-color: var(--accent);
+        background: var(--accent);
+      }
+
+      .keyboard-hint {
+        position: fixed;
+        left: clamp(0.7rem, 2vw, 1.5rem);
+        bottom: clamp(0.62rem, 1.7vh, 1.1rem);
+        z-index: 1000;
+        color: rgba(244, 239, 223, 0.5);
+        font-size: var(--small-size);
+      }
+
+      /* ===========================================
+         REUSABLE LAYOUT COMPONENTS
+         =========================================== */
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(17rem, 0.9fr);
+        gap: clamp(1rem, 4vw, 4rem);
+        align-items: center;
+        min-height: 0;
+      }
+
+      .wide-text {
+        max-width: min(58rem, 90vw);
+      }
+
+      .statement {
+        padding: clamp(0.75rem, 2vw, 1.3rem);
+        border-left: clamp(0.18rem, 0.45vw, 0.34rem) solid var(--accent);
+        background: linear-gradient(90deg, rgba(125, 255, 154, 0.1), transparent);
+        max-width: min(54rem, 90vw);
+      }
+
+      .mini-label {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        gap: clamp(0.32rem, 0.8vw, 0.55rem);
+        padding: clamp(0.28rem, 0.7vw, 0.42rem) clamp(0.46rem, 1.1vw, 0.72rem);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: var(--small-size);
+        background: rgba(244, 239, 223, 0.045);
+      }
+
+      .mini-label::before {
+        content: "";
+        width: clamp(0.35rem, 0.7vw, 0.5rem);
+        height: clamp(0.35rem, 0.7vw, 0.5rem);
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
+      .panel {
+        background: linear-gradient(145deg, rgba(244, 239, 223, 0.1), rgba(244, 239, 223, 0.045));
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 clamp(1rem, 3vw, 2rem) clamp(2rem, 8vw, 5rem) var(--shadow);
+      }
+
+      .grid-4 {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: clamp(0.55rem, 1.5vw, 1rem);
+      }
+
+      .primitive {
+        padding: clamp(0.72rem, 1.8vw, 1.15rem);
+        min-height: clamp(8rem, 24vh, 13rem);
+        display: flex;
+        flex-direction: column;
+        gap: clamp(0.4rem, 1vw, 0.75rem);
+      }
+
+      .primitive .symbol {
+        width: clamp(2rem, 4vw, 3.2rem);
+        height: clamp(2rem, 4vw, 3.2rem);
+        display: grid;
+        place-items: center;
+        color: #11120f;
+        background: var(--accent);
+        border-radius: 50%;
+        font-weight: 800;
+        font-size: clamp(1rem, 2vw, 1.45rem);
+      }
+
+      .primitive:nth-child(2) .symbol { background: var(--accent-2); }
+      .primitive:nth-child(3) .symbol { background: var(--accent-3); }
+      .primitive:nth-child(4) .symbol { background: var(--danger); }
+
+      .primitive p {
+        line-height: 1.55;
+      }
+
+      .bullets {
+        display: grid;
+        gap: clamp(0.45rem, 1.2vh, 0.85rem);
+        max-width: min(47rem, 88vw);
+      }
+
+      .bullet {
+        display: grid;
+        grid-template-columns: clamp(1.35rem, 2.4vw, 1.8rem) 1fr;
+        gap: clamp(0.48rem, 1.2vw, 0.8rem);
+        align-items: start;
+      }
+
+      .bullet span {
+        display: grid;
+        place-items: center;
+        width: clamp(1.35rem, 2.4vw, 1.8rem);
+        height: clamp(1.35rem, 2.4vw, 1.8rem);
+        border-radius: 50%;
+        color: #11120f;
+        background: var(--accent-2);
+        font-size: var(--small-size);
+        font-weight: 800;
+      }
+
+      /* ===========================================
+         VISUALS: GRAPH, STACK, SUPPLY CHAIN
+         =========================================== */
+      .graph-visual {
+        min-height: clamp(18rem, 56vh, 30rem);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .graph-visual::before,
+      .graph-visual::after {
+        content: "";
+        position: absolute;
+        inset: 14%;
+        border: 1px solid rgba(244, 239, 223, 0.08);
+        border-radius: 50%;
+      }
+
+      .graph-visual::after {
+        inset: 27%;
+      }
+
+      .node {
+        position: absolute;
+        display: grid;
+        place-items: center;
+        width: clamp(4.5rem, 10vw, 7rem);
+        aspect-ratio: 1;
+        border-radius: 50%;
+        text-align: center;
+        color: #10110e;
+        background: var(--paper);
+        font-weight: 800;
+        font-size: clamp(0.75rem, 1.25vw, 1rem);
+        box-shadow: 0 clamp(0.7rem, 2vw, 1.3rem) clamp(1.4rem, 4vw, 2.4rem) rgba(0, 0, 0, 0.32);
+        animation: pulseNode 4s ease-in-out infinite;
+      }
+
+      .node:nth-child(1) { left: 10%; top: 16%; background: var(--accent); }
+      .node:nth-child(2) { right: 10%; top: 22%; background: var(--accent-2); animation-delay: 0.6s; }
+      .node:nth-child(3) { left: 36%; bottom: 10%; background: var(--accent-3); animation-delay: 1.1s; }
+      .node:nth-child(4) { left: 46%; top: 38%; width: clamp(5.8rem, 12vw, 8.6rem); background: var(--paper); animation-delay: 1.8s; }
+
+      .edge {
+        position: absolute;
+        height: clamp(0.1rem, 0.25vw, 0.18rem);
+        transform-origin: left center;
+        background:
+          repeating-linear-gradient(90deg, rgba(125, 255, 154, 0.92) 0 12px, rgba(255, 189, 89, 0.5) 12px 24px);
+        background-size: clamp(2rem, 5vw, 4rem) 100%;
+        animation: flow 2.8s linear infinite;
+        opacity: 0.7;
+      }
+
+      .edge.e1 { width: 44%; left: 22%; top: 34%; transform: rotate(8deg); }
+      .edge.e2 { width: 36%; left: 56%; top: 48%; transform: rotate(122deg); }
+      .edge.e3 { width: 34%; left: 27%; bottom: 29%; transform: rotate(-36deg); }
+
+      .stack {
+        display: grid;
+        gap: clamp(0.42rem, 1.2vh, 0.72rem);
+        min-height: 0;
+      }
+
+      .stack-row {
+        display: grid;
+        grid-template-columns: clamp(7rem, 15vw, 10rem) 1fr;
+        align-items: center;
+        gap: clamp(0.6rem, 1.4vw, 1rem);
+        padding: clamp(0.55rem, 1.4vw, 0.9rem);
+      }
+
+      .stack-name {
+        color: var(--paper);
+        font-weight: 800;
+        font-size: clamp(0.82rem, 1.2vw, 1rem);
+      }
+
+      .stack-desc {
+        color: var(--ink-soft);
+        font-size: var(--small-size);
+        line-height: 1.45;
+      }
+
+      .supply-chain {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        align-items: center;
+        gap: clamp(0.5rem, 1.4vw, 1rem);
+      }
+
+      .chain-node {
+        position: relative;
+        padding: clamp(0.7rem, 1.6vw, 1.1rem);
+        min-height: clamp(6rem, 18vh, 9rem);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      .chain-node:not(:last-child)::after {
+        content: "→";
+        position: absolute;
+        right: calc(-1 * clamp(0.68rem, 1.8vw, 1.2rem));
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--accent-2);
+        font-size: clamp(1.1rem, 2.4vw, 1.7rem);
+        font-weight: 800;
+        z-index: 2;
+      }
+
+      .chain-node b {
+        color: var(--paper);
+        font-size: clamp(0.78rem, 1.25vw, 1rem);
+      }
+
+      .chain-node small {
+        color: var(--muted);
+        font-size: var(--small-size);
+        line-height: 1.35;
+      }
+
+      .impact {
+        color: #11120f;
+        background: var(--accent);
+        border-radius: 999px;
+        width: fit-content;
+        padding: clamp(0.16rem, 0.45vw, 0.28rem) clamp(0.44rem, 0.9vw, 0.64rem);
+        font-size: var(--small-size);
+        font-weight: 800;
+      }
+
+      .closing-map {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: clamp(0.45rem, 1.4vw, 1rem);
+        max-width: min(70rem, 92vw);
+      }
+
+      .closing-item {
+        padding: clamp(0.75rem, 1.8vw, 1.2rem);
+        min-height: clamp(7rem, 22vh, 11rem);
+      }
+
+      .closing-item h3 {
+        color: var(--accent);
+        margin-bottom: clamp(0.3rem, 0.8vw, 0.55rem);
+      }
+
+      .closing-item:nth-child(2) h3 { color: var(--accent-2); }
+      .closing-item:nth-child(3) h3 { color: var(--accent-3); }
+      .closing-item:nth-child(4) h3 { color: var(--danger); }
+
+      /* ===========================================
+         RESPONSIVE ADJUSTMENTS
+         =========================================== */
+      @media (max-width: 900px) {
+        .split {
+          grid-template-columns: 1fr;
+        }
+
+        .graph-visual {
+          min-height: clamp(14rem, 38vh, 22rem);
+        }
+
+        .grid-4,
+        .closing-map {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .supply-chain {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .chain-node:not(:last-child)::after {
+          display: none;
+        }
+      }
+
+      @media (max-width: 600px) {
+        .grid-4,
+        .closing-map,
+        .supply-chain {
+          grid-template-columns: 1fr;
+        }
+
+        .primitive,
+        .closing-item,
+        .chain-node {
+          min-height: auto;
+        }
+
+        .stack-row {
+          grid-template-columns: 1fr;
+        }
+
+        .nav-dots {
+          display: none;
+        }
+      }
+
+      @media (max-height: 680px) and (min-width: 760px) {
+        p {
+          line-height: 1.5;
+        }
+
+        .primitive,
+        .closing-item {
+          min-height: clamp(6rem, 20vh, 9rem);
+        }
+
+        .graph-visual {
+          min-height: clamp(13rem, 45vh, 22rem);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="progress-bar" id="progressBar"></div>
+    <nav class="nav-dots" id="navDots" aria-label="幻灯片导航"></nav>
+    <div class="keyboard-hint">← → / Space 翻页</div>
+
+    <!-- ===========================================
+       SLIDE 1: TITLE
+       =========================================== -->
+    <section class="slide title-slide">
+      <div class="slide-content">
+        <span class="eyebrow reveal">Ontology as Operating Layer</span>
+        <h1 class="reveal">本体论：把行业理解变成可计算结构</h1>
+        <p class="kicker reveal">
+          它不是一套术语表，而是一种把业务知识组织成对象、关系、动作和计算逻辑的方法论。
+        </p>
+      </div>
+    </section>
+
+    <!-- ===========================================
+       SLIDE 2: CORE IDEA
+       =========================================== -->
+    <section class="slide">
+      <div class="slide-content">
+        <span class="eyebrow reveal">01 / 方法论</span>
+        <h2 class="reveal">本体论先回答一个问题：业务世界如何被系统理解？</h2>
+        <div class="statement reveal">
+          <p>
+            对业务知识进行结构化建模：把人脑里对行业的理解，变成计算机能读懂、能查询、能计算、能执行的结构。
+          </p>
+        </div>
+        <div class="bullets reveal">
+          <div class="bullet"><span>1</span><p>哪些东西存在：企业、材料、设备、订单、人员、流程。</p></div>
+          <div class="bullet"><span>2</span><p>它们如何连接：供应、生产、归属、影响、触发。</p></div>
+          <div class="bullet"><span>3</span><p>系统如何行动：写回图谱、触发流程、启动分析。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===========================================
+       SLIDE 3: PALANTIR EXAMPLE
+       =========================================== -->
+    <section class="slide">
+      <div class="slide-content split">
+        <div>
+          <span class="eyebrow reveal">02 / Palantir Foundry</span>
+          <h2 class="reveal">企业软件里的本体层：把数据建模成业务图谱</h2>
+          <p class="reveal">
+            Palantir 是最早把本体论引入企业软件平台的公司之一。在 Foundry 中，客户企业的设备、订单、人员、流程，会被按照
+            <strong>对象、链接、动作</strong> 建模成一张图谱。
+          </p>
+          <p class="reveal">
+            关键不是“把数据库换个名字”，而是给数据加上一层业务语义，让上层应用面向业务对象工作。
+          </p>
+        </div>
+        <div class="graph-visual panel reveal" aria-label="对象链接动作图谱示意">
+          <div class="node">设备</div>
+          <div class="node">订单</div>
+          <div class="node">人员</div>
+          <div class="node">流程</div>
+          <div class="edge e1"></div>
+          <div class="edge e2"></div>
+          <div class="edge e3"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===========================================
+       SLIDE 4: SEMANTIC MIDDLE PLATFORM
+       =========================================== -->
+    <section class="slide">
+      <div class="slide-content">
+        <span class="eyebrow reveal">03 / 语义中台</span>
+        <h2 class="reveal">上层应用不再直接读原始数据库</h2>
+        <div class="stack reveal">
+          <div class="stack-row panel">
+            <div class="stack-name">AI 功能</div>
+            <div class="stack-desc">问答、智能体、自动分析，调用统一的业务语义。</div>
+          </div>
+          <div class="stack-row panel">
+            <div class="stack-name">决策支持</div>
+            <div class="stack-desc">围绕对象和关系做推演，而不是临时拼 SQL。</div>
+          </div>
+          <div class="stack-row panel">
+            <div class="stack-name">数据分析</div>
+            <div class="stack-desc">指标、洞察、报表建立在同一套业务模型之上。</div>
+          </div>
+          <div class="stack-row panel" style="border-color: rgba(125,255,154,0.42);">
+            <div class="stack-name">本体层</div>
+            <div class="stack-desc">企业数字资产的语义中台：统一对象、链接、动作、函数。</div>
+          </div>
+          <div class="stack-row panel">
+            <div class="stack-name">原始数据</div>
+            <div class="stack-desc">数据库、表、日志、接口、文档、业务系统。</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===========================================
+       SLIDE 5: FOUR PRIMITIVES
+       =========================================== -->
+    <section class="slide">
+      <div class="slide-content">
+        <span class="eyebrow reveal">04 / 核心要素</span>
+        <h2 class="reveal">四个基本件，刻画一个行业</h2>
+        <div class="grid-4 reveal">
+          <article class="primitive panel">
+            <div class="symbol">O</div>
+            <h3>对象 Object</h3>
+            <p>行业里存在的实体，以及它们的属性。</p>
+          </article>
+          <article class="primitive panel">
+            <div class="symbol">L</div>
+            <h3>链接 Link</h3>
+            <p>对象之间的关系，说明谁影响谁、谁连接谁。</p>
+          </article>
+          <article class="primitive panel">
+            <div class="symbol">F</div>
+            <h3>函数 Function</h3>
+            <p>定义在对象和链接之上的计算逻辑。</p>
+          </article>
+          <article class="primitive panel">
+            <div class="symbol">A</div>
+            <h3>动作 Action</h3>
+            <p>图谱数据的写操作入口，以及后续触发行为。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===========================================
+       SLIDE 6: NEW ENERGY EXAMPLE
+       =========================================== -->
+    <section class="slide">
+      <div class="slide-content">
+        <span class="eyebrow reveal">05 / 新能源行业</span>
+        <h2 class="reveal">对象定义“谁存在”，链接定义“关系是什么”</h2>
+        <div class="supply-chain reveal">
+          <div class="chain-node panel">
+            <b>碳酸锂</b>
+            <small>原材料对象</small>
+            <span class="mini-label">Object</span>
+          </div>
+          <div class="chain-node panel">
+            <b>正极材料</b>
+            <small>材料对象，被上游原料影响</small>
+            <span class="mini-label">Link: 原材料</span>
+          </div>
+          <div class="chain-node panel">
+            <b>宁德时代</b>
+            <small>电池企业对象</small>
+            <span class="mini-label">Link: 供应</span>
+          </div>
+          <div class="chain-node panel">
+            <b>理想汽车</b>
+            <small>整车企业对象</small>
+            <span class="mini-label">Link: 供给</span>
+          </div>
+        </div>
+        <p class="wide-text reveal">
+          例如：“碳酸锂是正极材料的原材料”，这句话在系统里不只是文本，而是一条可遍历、可计算、可被应用调用的链接。
+        </p>
+      </div>
+    </section>
+
+    <!-- ===========================================
+       SLIDE 7: FUNCTION EXAMPLE
+       =========================================== -->
+    <section class="slide">
+      <div class="slide-content">
+        <span class="eyebrow reveal">06 / 计算逻辑</span>
+        <h2 class="reveal">函数告诉系统：如何在结构上做分析</h2>
+        <p class="wide-text reveal">
+          价格传导函数：输入任意一个原材料节点和价格变化幅度，系统沿供应链关系向下遍历，计算每一跳的成本影响。
+        </p>
+        <div class="supply-chain reveal">
+          <div class="chain-node panel">
+            <b>碳酸锂</b>
+            <small>输入：价格 -10%</small>
+            <span class="impact">source</span>
+          </div>
+          <div class="chain-node panel">
+            <b>正极材料</b>
+            <small>计算：原料成本变化</small>
+            <span class="impact">impact 1</span>
+          </div>
+          <div class="chain-node panel">
+            <b>电芯</b>
+            <small>计算：BOM 成本变化</small>
+            <span class="impact">impact 2</span>
+          </div>
+          <div class="chain-node panel">
+            <b>整车</b>
+            <small>计算：毛利与定价空间</small>
+            <span class="impact">impact 3</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===========================================
+       SLIDE 8: ACTION AND SUMMARY
+       =========================================== -->
+    <section class="slide">
+      <div class="slide-content">
+        <span class="eyebrow reveal">07 / 闭环</span>
+        <h2 class="reveal">动作把分析结果写回图谱，或触发后续操作</h2>
+        <div class="closing-map reveal">
+          <article class="closing-item panel">
+            <h3>对象</h3>
+            <p>定义谁存在。</p>
+          </article>
+          <article class="closing-item panel">
+            <h3>链接</h3>
+            <p>定义关系是什么。</p>
+          </article>
+          <article class="closing-item panel">
+            <h3>函数</h3>
+            <p>定义怎么在结构上计算。</p>
+          </article>
+          <article class="closing-item panel">
+            <h3>动作</h3>
+            <p>定义怎么写回图谱，或触发下一步。</p>
+          </article>
+        </div>
+        <div class="statement reveal">
+          <p>
+            本体层的价值，是把企业数据从“能存储”提升到“能理解、能计算、能行动”。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <script>
+      /* ===========================================
+         SLIDE PRESENTATION CONTROLLER
+         =========================================== */
+      class SlidePresentation {
+        constructor() {
+          this.slides = Array.from(document.querySelectorAll(".slide"));
+          this.currentSlide = 0;
+          this.progressBar = document.getElementById("progressBar");
+          this.navDotsContainer = document.getElementById("navDots");
+          this.touchStartY = 0;
+          this.wheelLocked = false;
+          this.setupIntersectionObserver();
+          this.setupKeyboardNav();
+          this.setupTouchNav();
+          this.setupWheelNav();
+          this.setupNavDots();
+          this.updateUI();
+        }
+
+        setupIntersectionObserver() {
+          const observer = new IntersectionObserver(
+            (entries) => {
+              entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                  entry.target.classList.add("visible");
+                  this.currentSlide = this.slides.indexOf(entry.target);
+                  this.updateUI();
+                }
+              });
+            },
+            { threshold: 0.62 }
+          );
+
+          this.slides.forEach((slide) => observer.observe(slide));
+        }
+
+        setupKeyboardNav() {
+          document.addEventListener("keydown", (event) => {
+            const nextKeys = ["ArrowDown", "ArrowRight", "PageDown", " "];
+            const prevKeys = ["ArrowUp", "ArrowLeft", "PageUp"];
+            if (nextKeys.includes(event.key)) {
+              event.preventDefault();
+              this.goToSlide(this.currentSlide + 1);
+            }
+            if (prevKeys.includes(event.key)) {
+              event.preventDefault();
+              this.goToSlide(this.currentSlide - 1);
+            }
+            if (event.key === "Home") {
+              event.preventDefault();
+              this.goToSlide(0);
+            }
+            if (event.key === "End") {
+              event.preventDefault();
+              this.goToSlide(this.slides.length - 1);
+            }
+          });
+        }
+
+        setupTouchNav() {
+          document.addEventListener("touchstart", (event) => {
+            this.touchStartY = event.changedTouches[0].clientY;
+          }, { passive: true });
+
+          document.addEventListener("touchend", (event) => {
+            const delta = this.touchStartY - event.changedTouches[0].clientY;
+            if (Math.abs(delta) < 42) return;
+            this.goToSlide(this.currentSlide + (delta > 0 ? 1 : -1));
+          }, { passive: true });
+        }
+
+        setupWheelNav() {
+          document.addEventListener("wheel", (event) => {
+            if (this.wheelLocked || Math.abs(event.deltaY) < 20) return;
+            this.wheelLocked = true;
+            this.goToSlide(this.currentSlide + (event.deltaY > 0 ? 1 : -1));
+            window.setTimeout(() => {
+              this.wheelLocked = false;
+            }, 640);
+          }, { passive: true });
+        }
+
+        setupNavDots() {
+          this.navDotsContainer.innerHTML = "";
+          this.slides.forEach((_, index) => {
+            const dot = document.createElement("button");
+            dot.className = "nav-dot";
+            dot.type = "button";
+            dot.setAttribute("aria-label", `跳转到第 ${index + 1} 页`);
+            dot.addEventListener("click", () => this.goToSlide(index));
+            this.navDotsContainer.appendChild(dot);
+          });
+        }
+
+        goToSlide(index) {
+          const target = Math.max(0, Math.min(index, this.slides.length - 1));
+          this.slides[target].scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+
+        updateUI() {
+          const progress = ((this.currentSlide + 1) / this.slides.length) * 100;
+          this.progressBar.style.width = `${progress}%`;
+          Array.from(this.navDotsContainer.children).forEach((dot, index) => {
+            dot.classList.toggle("active", index === this.currentSlide);
+          });
+        }
+      }
+
+      new SlidePresentation();
+    </script>
+  </body>
+</html>

@@ -2,6 +2,7 @@ package com.ontology.controller;
 
 import com.ontology.entity.AIConversation;
 import com.ontology.mapper.AIConversationMapper;
+import com.ontology.project.ProjectScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,15 +21,17 @@ public class AIConversationController {
     private final AIConversationMapper conversationMapper;
     
     @GetMapping("/conversations")
-    public Map<String, Object> list() {
-        List<AIConversation> conversations = conversationMapper.selectListOrdered();
+    public Map<String, Object> list(@RequestParam(required = false) String projectId) {
+        String scopedProjectId = ProjectScope.normalize(projectId);
+        List<AIConversation> conversations = conversationMapper.selectListOrdered(scopedProjectId);
         return Map.of("conversations", conversations);
     }
     
     @GetMapping("/conversations/{id}")
-    public Map<String, Object> getById(@PathVariable String id) {
+    public Map<String, Object> getById(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        String scopedProjectId = ProjectScope.normalize(projectId);
         AIConversation conversation = conversationMapper.selectById(id);
-        if (conversation == null) {
+        if (conversation == null || !scopedProjectId.equals(conversation.getProjectId())) {
             throw new RuntimeException("Conversation not found");
         }
         
@@ -44,15 +47,17 @@ public class AIConversationController {
     }
     
     @PostMapping("/conversations")
-    public Map<String, Object> create(@RequestBody Map<String, Object> data) {
+    public Map<String, Object> create(@RequestBody Map<String, Object> data, @RequestParam(required = false) String projectId) {
         String title = (String) data.getOrDefault("title", "新对话");
         String id = "conv_" + UUID.randomUUID().toString().substring(0, 8);
+        String scopedProjectId = ProjectScope.normalize(projectId);
         
         AIConversation conversation = new AIConversation();
         conversation.setId(id);
         conversation.setTitle(title);
         conversation.setMessages("[]");
         conversation.setPreviewOntology(null);
+        conversation.setProjectId(scopedProjectId);
         conversation.setCreatedAt(LocalDateTime.now());
         conversation.setUpdatedAt(LocalDateTime.now());
         
@@ -68,9 +73,10 @@ public class AIConversationController {
     }
     
     @PutMapping("/conversations/{id}")
-    public Map<String, Object> update(@PathVariable String id, @RequestBody Map<String, Object> data) {
+    public Map<String, Object> update(@PathVariable String id, @RequestBody Map<String, Object> data, @RequestParam(required = false) String projectId) {
+        String scopedProjectId = ProjectScope.normalize(projectId);
         AIConversation conversation = conversationMapper.selectById(id);
-        if (conversation == null) {
+        if (conversation == null || !scopedProjectId.equals(conversation.getProjectId())) {
             throw new RuntimeException("Conversation not found");
         }
         
@@ -103,7 +109,12 @@ public class AIConversationController {
     }
     
     @DeleteMapping("/conversations/{id}")
-    public Map<String, Object> delete(@PathVariable String id) {
+    public Map<String, Object> delete(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        String scopedProjectId = ProjectScope.normalize(projectId);
+        AIConversation conversation = conversationMapper.selectById(id);
+        if (conversation == null || !scopedProjectId.equals(conversation.getProjectId())) {
+            throw new RuntimeException("Conversation not found");
+        }
         conversationMapper.deleteById(id);
         return Map.of("success", true);
     }

@@ -27,6 +27,8 @@ public class Agent {
     private Integer scheduleMinutes;
     
     private Integer isActive;
+
+    private String projectId;
     
     private LocalDateTime lastRunAt;
     

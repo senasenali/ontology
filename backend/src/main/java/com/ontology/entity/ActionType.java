@@ -21,6 +21,8 @@ public class ActionType {
     private String description;
     
     private String status;
+
+    private String projectId;
     
     private LocalDateTime createdAt;
     

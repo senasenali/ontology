@@ -23,8 +23,9 @@ public class ActionTypeController {
     private final FunctionTypeMapper functionTypeMapper;
     
     @GetMapping
-    public Map<String, Object> list() {
-        List<ActionType> list = actionTypeMapper.selectAllActive();
+    public Map<String, Object> list(@RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
+        List<ActionType> list = actionTypeMapper.selectAllActive(projectId);
         
         // 加载规则和副作用
         for (ActionType at : list) {
@@ -35,9 +36,10 @@ public class ActionTypeController {
     }
     
     @GetMapping("/{id}")
-    public Map<String, Object> getById(@PathVariable String id) {
+    public Map<String, Object> getById(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         ActionType at = actionTypeMapper.selectById(id);
-        if (at == null) {
+        if (at == null || !projectId.equals(at.getProjectId())) {
             return Map.of("success", false, "error", "Action type not found");
         }
         loadRulesAndEffects(at);
@@ -46,7 +48,8 @@ public class ActionTypeController {
     
     @PostMapping
     @Transactional
-    public Map<String, Object> create(@RequestBody Map<String, Object> data) {
+    public Map<String, Object> create(@RequestBody Map<String, Object> data, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         String displayName = (String) data.get("displayName");
         if (displayName == null || displayName.isEmpty()) {
             return Map.of("success", false, "error", "Display name is required");
@@ -57,25 +60,27 @@ public class ActionTypeController {
         at.setDisplayName(displayName);
         at.setDescription((String) data.get("description"));
         at.setStatus("ACTIVE");
+        at.setProjectId(projectId);
         at.setCreatedAt(LocalDateTime.now());
         at.setUpdatedAt(LocalDateTime.now());
         
         actionTypeMapper.insert(at);
         
         // 保存规则
-        saveRules(at.getId(), data);
+        saveRules(at.getId(), data, projectId);
         
         // 保存副作用
-        saveEffects(at.getId(), data);
+        saveEffects(at.getId(), data, projectId);
         
         return Map.of("success", true, "actionType", at);
     }
     
     @PutMapping("/{id}")
     @Transactional
-    public Map<String, Object> update(@PathVariable String id, @RequestBody Map<String, Object> data) {
+    public Map<String, Object> update(@PathVariable String id, @RequestBody Map<String, Object> data, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         ActionType at = actionTypeMapper.selectById(id);
-        if (at == null) {
+        if (at == null || !projectId.equals(at.getProjectId())) {
             return Map.of("success", false, "error", "Action type not found");
         }
         
@@ -90,13 +95,13 @@ public class ActionTypeController {
         if (data.containsKey("rules")) {
             actionRuleParamMapper.deleteByActionTypeId(id);
             actionRuleMapper.deleteByActionTypeId(id);
-            saveRules(id, data);
+            saveRules(id, data, projectId);
         }
         
         // 更新副作用
         if (data.containsKey("effects")) {
             actionEffectMapper.deleteByActionTypeId(id);
-            saveEffects(id, data);
+            saveEffects(id, data, projectId);
         }
         
         return Map.of("success", true, "actionType", at);
@@ -104,7 +109,12 @@ public class ActionTypeController {
     
     @DeleteMapping("/{id}")
     @Transactional
-    public Map<String, Object> delete(@PathVariable String id) {
+    public Map<String, Object> delete(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
+        ActionType current = actionTypeMapper.selectById(id);
+        if (current == null || !projectId.equals(current.getProjectId())) {
+            return Map.of("success", false, "error", "Action type not found");
+        }
         // 软删除
         ActionType at = new ActionType();
         at.setId(id);
@@ -146,7 +156,7 @@ public class ActionTypeController {
     }
     
     @SuppressWarnings("unchecked")
-    private void saveRules(String actionTypeId, Map<String, Object> data) {
+    private void saveRules(String actionTypeId, Map<String, Object> data, String projectId) {
         List<Map<String, Object>> rules = (List<Map<String, Object>>) data.get("rules");
         if (rules == null) return;
         
@@ -160,6 +170,7 @@ public class ActionTypeController {
             rule.setOntologyRuleId((String) ruleData.get("ontologyRuleId"));
             rule.setFunctionTypeId((String) ruleData.get("functionTypeId"));
             rule.setSortOrder(sortOrder++);
+            rule.setProjectId(projectId);
             rule.setCreatedAt(LocalDateTime.now());
             
             actionRuleMapper.insert(rule);
@@ -169,12 +180,18 @@ public class ActionTypeController {
             if (params != null) {
                 int paramSort = 0;
                 for (Map<String, Object> paramData : params) {
+                    String paramName = (String) paramData.get("paramName");
+                    String paramValue = (String) paramData.get("paramValue");
+                    if (paramName == null || paramName.isBlank() || paramValue == null || paramValue.isBlank()) {
+                        continue;
+                    }
                     ActionRuleParam param = new ActionRuleParam();
                     param.setId("arp_" + System.currentTimeMillis() + "_" + paramSort);
                     param.setActionRuleId(rule.getId());
-                    param.setParamName((String) paramData.get("paramName"));
-                    param.setParamValue((String) paramData.get("paramValue"));
+                    param.setParamName(paramName);
+                    param.setParamValue(paramValue);
                     param.setSortOrder(paramSort++);
+                    param.setProjectId(projectId);
                     actionRuleParamMapper.insert(param);
                 }
             }
@@ -182,7 +199,7 @@ public class ActionTypeController {
     }
     
     @SuppressWarnings("unchecked")
-    private void saveEffects(String actionTypeId, Map<String, Object> data) {
+    private void saveEffects(String actionTypeId, Map<String, Object> data, String projectId) {
         List<Map<String, Object>> effects = (List<Map<String, Object>>) data.get("effects");
         if (effects == null) return;
         
@@ -205,6 +222,7 @@ public class ActionTypeController {
             }
             effect.setIsEnabled(isEnabled);
             effect.setSortOrder(sortOrder++);
+            effect.setProjectId(projectId);
             actionEffectMapper.insert(effect);
         }
     }

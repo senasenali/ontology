@@ -27,4 +27,6 @@ public class Property {
     private String typeClasses;
     
     private Integer sortOrder;
+
+    private String projectId;
 }

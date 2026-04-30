@@ -4,18 +4,23 @@ import fetch from 'node-fetch';
 
 const router = Router();
 
+function getProjectId(req: { query?: Record<string, any> }) {
+  return String(req.query?.projectId || 'project_public');
+}
+
 // 获取所有函数类型
 router.get('/', async (req, res) => {
   try {
     const { category } = req.query;
+    const projectId = getProjectId(req);
     const connection = await pool.getConnection();
     
-    let query = 'SELECT * FROM function_types WHERE status = ? ORDER BY created_at DESC';
-    let params: any[] = ['ACTIVE'];
+    let query = 'SELECT * FROM function_types WHERE status = ? AND project_id = ? ORDER BY created_at DESC';
+    let params: any[] = ['ACTIVE', projectId];
     
     if (category) {
-      query = 'SELECT * FROM function_types WHERE status = ? AND category = ? ORDER BY created_at DESC';
-      params = ['ACTIVE', category];
+      query = 'SELECT * FROM function_types WHERE status = ? AND project_id = ? AND category = ? ORDER BY created_at DESC';
+      params = ['ACTIVE', projectId, category];
     }
     
     const [rows]: any = await connection.execute(query, params);
@@ -77,11 +82,12 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const projectId = getProjectId(req);
     const connection = await pool.getConnection();
     
     const [rows]: any = await connection.execute(
-      'SELECT * FROM function_types WHERE id = ?',
-      [id]
+      'SELECT * FROM function_types WHERE id = ? AND project_id = ?',
+      [id, projectId]
     );
     
     if (rows.length === 0) {
@@ -148,6 +154,7 @@ router.post('/', async (req, res) => {
     implementationType,
     inputParams, outputParams 
   } = req.body;
+  const projectId = getProjectId(req);
   
   if (!code || !name) {
     return res.status(400).json({ success: false, error: '函数编码和名称为必填项' });
@@ -166,8 +173,8 @@ router.post('/', async (req, res) => {
     await connection.execute(
       `INSERT INTO function_types (id, code, name, description, category, 
         interface_type, request_method, interface_url, 
-        implementation_type, status, created_at, updated_at) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        implementation_type, status, project_id, created_at, updated_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         id, 
         safeValue(code), 
@@ -178,7 +185,8 @@ router.post('/', async (req, res) => {
         safeValue(requestMethod) || 'GET', 
         safeValue(interfaceUrl) || '',
         safeValue(implementationType) || 'JAVA', 
-        'ACTIVE'
+        'ACTIVE',
+        projectId
       ]
     );
     
@@ -188,8 +196,8 @@ router.post('/', async (req, res) => {
         const p = inputParams[i];
         await connection.execute(
           `INSERT INTO function_params (id, function_id, param_direction, param_name, param_code, 
-            param_type, is_required, default_value, description, sort_order, source_type) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            param_type, is_required, default_value, description, sort_order, source_type, project_id) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             `fp_${Date.now()}_${i}`, 
             id, 
@@ -201,7 +209,8 @@ router.post('/', async (req, res) => {
             safeValue(p.defaultValue),
             safeValue(p.description) || '', 
             i, 
-            safeValue(p.sourceType) || 'USER_INPUT'
+            safeValue(p.sourceType) || 'USER_INPUT',
+            projectId
           ]
         );
       }
@@ -213,8 +222,8 @@ router.post('/', async (req, res) => {
         const p = outputParams[i];
         await connection.execute(
           `INSERT INTO function_params (id, function_id, param_direction, param_name, param_code, 
-            param_type, is_required, description, sort_order) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            param_type, is_required, description, sort_order, project_id) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             `fp_${Date.now()}_out_${i}`, 
             id, 
@@ -224,7 +233,8 @@ router.post('/', async (req, res) => {
             safeValue(p.paramType) || 'string', 
             0, 
             safeValue(p.description) || '', 
-            i
+            i,
+            projectId
           ]
         );
       }
@@ -255,6 +265,7 @@ router.post('/', async (req, res) => {
 // 更新函数类型
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
+  const projectId = getProjectId(req);
   const { 
     code, name, description, category,
     interfaceType, requestMethod, interfaceUrl,
@@ -269,8 +280,8 @@ router.put('/:id', async (req, res) => {
     
     // 获取现有数据
     const [existing]: any = await connection.execute(
-      'SELECT * FROM function_types WHERE id = ?',
-      [id]
+      'SELECT * FROM function_types WHERE id = ? AND project_id = ?',
+      [id, projectId]
     );
     
     if (existing.length === 0) {
@@ -308,16 +319,16 @@ router.put('/:id', async (req, res) => {
     // 如果提供了参数，则更新参数
     if (inputParams !== undefined || outputParams !== undefined) {
       // 删除旧参数
-      await connection.execute('DELETE FROM function_params WHERE function_id = ?', [id]);
+      await connection.execute('DELETE FROM function_params WHERE function_id = ? AND project_id = ?', [id, projectId]);
       
       // 插入新入参
       if (inputParams && Array.isArray(inputParams)) {
         for (let i = 0; i < inputParams.length; i++) {
           const p = inputParams[i];
           await connection.execute(
-            `INSERT INTO function_params (id, function_id, param_direction, param_name, param_code, 
-              param_type, is_required, default_value, description, sort_order, source_type) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO function_params (id, function_id, param_direction, param_name, param_code, 
+              param_type, is_required, default_value, description, sort_order, source_type, project_id) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               `fp_${Date.now()}_${i}`, 
               id, 
@@ -329,7 +340,8 @@ router.put('/:id', async (req, res) => {
               safeValue(p.defaultValue),
               safeValue(p.description) || '', 
               i, 
-              safeValue(p.sourceType) || 'USER_INPUT'
+              safeValue(p.sourceType) || 'USER_INPUT',
+              projectId
             ]
           );
         }
@@ -340,9 +352,9 @@ router.put('/:id', async (req, res) => {
         for (let i = 0; i < outputParams.length; i++) {
           const p = outputParams[i];
           await connection.execute(
-            `INSERT INTO function_params (id, function_id, param_direction, param_name, param_code, 
-              param_type, is_required, description, sort_order) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO function_params (id, function_id, param_direction, param_name, param_code, 
+              param_type, is_required, description, sort_order, project_id) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               `fp_${Date.now()}_out_${i}`, 
               id, 
@@ -352,7 +364,8 @@ router.put('/:id', async (req, res) => {
               safeValue(p.paramType) || 'string', 
               0, 
               safeValue(p.description) || '', 
-              i
+              i,
+              projectId
             ]
           );
         }
@@ -388,12 +401,13 @@ router.put('/:id', async (req, res) => {
 // 删除函数类型（软删除）
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
+  const projectId = getProjectId(req);
   
   try {
     const connection = await pool.getConnection();
     await connection.execute(
-      'UPDATE function_types SET status = ?, updated_at = NOW() WHERE id = ?',
-      ['DISABLED', id]
+      'UPDATE function_types SET status = ?, updated_at = NOW() WHERE id = ? AND project_id = ?',
+      ['DISABLED', id, projectId]
     );
     connection.release();
     

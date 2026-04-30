@@ -11,6 +11,9 @@ import java.util.List;
 @Mapper
 public interface LinkTypeMapper extends BaseMapper<LinkType> {
     
+    @Select("SELECT * FROM link_types WHERE project_id = #{projectId} ORDER BY name")
+    List<LinkType> selectAllOrdered(@Param("projectId") String projectId);
+
     @Select("SELECT * FROM link_types ORDER BY name")
     List<LinkType> selectAllOrdered();
     

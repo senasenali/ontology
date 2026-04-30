@@ -15,7 +15,7 @@ public class OntologyController {
     private final OntologyService ontologyService;
     
     @GetMapping("/ontology")
-    public Map<String, Object> getAll() {
-        return ontologyService.buildOntologyData();
+    public Map<String, Object> getAll(@RequestParam(required = false) String projectId) {
+        return ontologyService.buildOntologyData(projectId);
     }
 }

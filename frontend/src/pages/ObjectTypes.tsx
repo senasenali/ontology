@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { OntologyData, ObjectType, Property, PropertyType } from '@/src/store/ontologyStore';
+import { InterfaceProperty, ObjectTypeImplementedInterface, OntologyData, ObjectType, Property, PropertyType } from '@/src/store/ontologyStore';
 import { Button } from '@/src/components/ui/button';
 import { Input } from '@/src/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/src/components/ui/table';
@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/src/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/src/components/ui/select';
 import { Label } from '@/src/components/ui/label';
-import { Search, Plus, Database, Key, MoreHorizontal, FileText, Settings2, Table as TableIcon, Trash2, Sparkles, Loader2 } from 'lucide-react';
+import { Search, Plus, Database, Key, FileText, Settings2, Table as TableIcon, Trash2, Sparkles, Loader2, Layers3, CheckCircle2, AlertCircle, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/src/api/client';
 
@@ -29,8 +29,17 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
   const [newPropId, setNewPropId] = useState('');
   const [newPropType, setNewPropType] = useState<PropertyType>('string');
   const [newPropBaseCol, setNewPropBaseCol] = useState('');
+  const [newPropDesc, setNewPropDesc] = useState('');
+  const [newPropIsPrimaryKey, setNewPropIsPrimaryKey] = useState('0');
   const [addingProp, setAddingProp] = useState(false);
   const [propDialogOpen, setPropDialogOpen] = useState(false);
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [implementationDialogOpen, setImplementationDialogOpen] = useState(false);
+  const [savingImplementation, setSavingImplementation] = useState(false);
+  const [editingImplementation, setEditingImplementation] = useState<ObjectTypeImplementedInterface | null>(null);
+  const [selectedInterfaceId, setSelectedInterfaceId] = useState('');
+  const [selectedInterfaceDetail, setSelectedInterfaceDetail] = useState<any | null>(null);
+  const [interfacePropertyMappings, setInterfacePropertyMappings] = useState<Record<string, string>>({});
 
   // AI suggestions
   const [suggestingProps, setSuggestingProps] = useState(false);
@@ -57,6 +66,7 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
 
   // Ensure properties array exists
   const selectedProperties = syncedSelected?.properties || [];
+  const implementedInterfaces = syncedSelected?.implementedInterfaces || [];
 
   // Load dataset columns when viewing datasource tab
   useEffect(() => {
@@ -131,12 +141,40 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
         id: newPropId,
         name: newPropName,
         type: newPropType,
+        description: newPropDesc,
+        isPrimaryKey: Number(newPropIsPrimaryKey),
         baseColumn: newPropBaseCol,
       });
       onUpdate(result.data);
-      setNewPropName(''); setNewPropId(''); setNewPropType('string'); setNewPropBaseCol('');
+      resetPropertyForm();
       setPropDialogOpen(false);
       toast.success(`Property "${newPropName}" added.`);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setAddingProp(false);
+    }
+  };
+
+  const handleSaveProperty = async () => {
+    if (!syncedSelected || !editingProperty || !newPropName) {
+      toast.error('Please fill in all required fields.');
+      return;
+    }
+    setAddingProp(true);
+    try {
+      const result = await api.updateProperty(syncedSelected.id, editingProperty.id, {
+        id: editingProperty.id,
+        name: newPropName,
+        type: newPropType,
+        description: newPropDesc,
+        isPrimaryKey: Number(newPropIsPrimaryKey),
+        baseColumn: newPropBaseCol,
+      });
+      onUpdate(result.data);
+      resetPropertyForm();
+      setPropDialogOpen(false);
+      toast.success(`Property "${newPropName}" updated.`);
     } catch (err: any) {
       toast.error(err.message);
     } finally {
@@ -153,6 +191,32 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
     } catch (err: any) {
       toast.error(err.message);
     }
+  };
+
+  const resetPropertyForm = () => {
+    setEditingProperty(null);
+    setNewPropName('');
+    setNewPropId('');
+    setNewPropType('string');
+    setNewPropBaseCol('');
+    setNewPropDesc('');
+    setNewPropIsPrimaryKey('0');
+  };
+
+  const openCreatePropertyDialog = () => {
+    resetPropertyForm();
+    setPropDialogOpen(true);
+  };
+
+  const openEditPropertyDialog = (property: Property) => {
+    setEditingProperty(property);
+    setNewPropName(property.name || '');
+    setNewPropId(property.id || '');
+    setNewPropType((property.type as PropertyType) || 'string');
+    setNewPropBaseCol(property.baseColumn || '');
+    setNewPropDesc(property.description || '');
+    setNewPropIsPrimaryKey(property.isPrimaryKey === 1 ? '1' : '0');
+    setPropDialogOpen(true);
   };
 
   // Update property's base column mapping
@@ -227,6 +291,97 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
     }
   };
 
+  const openCreateImplementationDialog = () => {
+    setEditingImplementation(null);
+    setSelectedInterfaceId('');
+    setInterfacePropertyMappings({});
+    setImplementationDialogOpen(true);
+  };
+
+  const openEditImplementationDialog = (implementation: ObjectTypeImplementedInterface) => {
+    const nextMappings: Record<string, string> = {};
+    (implementation.propertyMappings || []).forEach((mapping) => {
+      nextMappings[mapping.interfacePropertyId] = mapping.propertyId;
+    });
+    setEditingImplementation(implementation);
+    setSelectedInterfaceId(implementation.interfaceId);
+    setInterfacePropertyMappings(nextMappings);
+    setImplementationDialogOpen(true);
+  };
+
+  const selectedInterface = data.interfaces.find((item) => item.id === selectedInterfaceId) || null;
+  const selectedInterfaceProperties = editingImplementation?.interfaceProperties || selectedInterfaceDetail?.properties || selectedInterface?.properties || [];
+  const availableInterfaces = data.interfaces.filter((item) => (
+    item.id === editingImplementation?.interfaceId ||
+    !implementedInterfaces.some((implementation) => implementation.interfaceId === item.id)
+  ));
+
+  useEffect(() => {
+    const loadSelectedInterfaceDetail = async () => {
+      if (!implementationDialogOpen || !selectedInterfaceId || editingImplementation) {
+        setSelectedInterfaceDetail(null);
+        return;
+      }
+      try {
+        const result = await api.getInterfaceDetail(selectedInterfaceId);
+        setSelectedInterfaceDetail(result.interface);
+      } catch (err: any) {
+        setSelectedInterfaceDetail(null);
+        toast.error(err.message || '加载 Interface 详情失败');
+      }
+    };
+    loadSelectedInterfaceDetail();
+  }, [implementationDialogOpen, selectedInterfaceId, editingImplementation]);
+
+  const handleSaveImplementation = async () => {
+    if (!syncedSelected || !selectedInterfaceId) {
+      toast.error('请选择要实现的 Interface');
+      return;
+    }
+
+    const payload = {
+      interfaceId: selectedInterfaceId,
+      propertyMappings: Object.entries(interfacePropertyMappings)
+        .filter(([, propertyId]) => Boolean(propertyId))
+        .map(([interfacePropertyId, propertyId]) => ({
+          interfacePropertyId,
+          propertyId,
+        })),
+    };
+
+    setSavingImplementation(true);
+    try {
+      const result = editingImplementation
+        ? await api.updateObjectTypeInterface(syncedSelected.id, editingImplementation.id, payload)
+        : await api.createObjectTypeInterface(syncedSelected.id, payload);
+      onUpdate(result.data);
+      setImplementationDialogOpen(false);
+      setEditingImplementation(null);
+      setSelectedInterfaceId('');
+      setSelectedInterfaceDetail(null);
+      setInterfacePropertyMappings({});
+      toast.success(editingImplementation ? 'Interface 实现关系已更新' : 'Interface 实现关系已创建');
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setSavingImplementation(false);
+    }
+  };
+
+  const handleDeleteImplementation = async (implementation: ObjectTypeImplementedInterface) => {
+    if (!syncedSelected) return;
+    if (!confirm(`确定要移除 ${syncedSelected.name} 对 ${implementation.interfaceName || implementation.interfaceId} 的实现关系吗？`)) {
+      return;
+    }
+    try {
+      const result = await api.deleteObjectTypeInterface(syncedSelected.id, implementation.id);
+      onUpdate(result.data);
+      toast.success('实现关系已删除');
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
   // ── Detail View ─────────────────────────────────────────────────────────────
   if (syncedSelected) {
     // Debug log
@@ -261,6 +416,7 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
         <Tabs defaultValue="properties" className="w-full">
           <TabsList className="mb-4">
             <TabsTrigger value="properties" className="gap-2"><FileText className="w-4 h-4" /> 属性</TabsTrigger>
+            <TabsTrigger value="interfaces" className="gap-2"><Layers3 className="w-4 h-4" /> Implements Interfaces</TabsTrigger>
             <TabsTrigger value="datasource" className="gap-2"><TableIcon className="w-4 h-4" /> 数据源</TabsTrigger>
             <TabsTrigger value="settings" className="gap-2"><Settings2 className="w-4 h-4" /> 设置</TabsTrigger>
           </TabsList>
@@ -304,14 +460,16 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
                   </Button>
                   <Dialog open={propDialogOpen} onOpenChange={setPropDialogOpen}>
                     <DialogTrigger asChild>
-                      <Button size="sm" variant="outline" className="h-8 gap-1">
+                      <Button size="sm" variant="outline" className="h-8 gap-1" onClick={openCreatePropertyDialog}>
                         <Plus className="w-3 h-3" /> 添加属性
                       </Button>
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>添加属性</DialogTitle>
-                        <DialogDescription>为 {syncedSelected.name} 定义一个新属性。</DialogDescription>
+                        <DialogTitle>{editingProperty ? '编辑属性' : '添加属性'}</DialogTitle>
+                        <DialogDescription>
+                          {editingProperty ? `更新 ${syncedSelected.name} 的属性定义。` : `为 ${syncedSelected.name} 定义一个新属性。`}
+                        </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
                         <div className="space-y-2">
@@ -320,7 +478,7 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
                         </div>
                         <div className="space-y-2">
                           <Label>属性 ID *</Label>
-                          <Input value={newPropId} onChange={e => setNewPropId(e.target.value)} placeholder="例如：p_email" className="font-mono text-sm" />
+                          <Input value={newPropId} onChange={e => setNewPropId(e.target.value)} placeholder="例如：p_email" className="font-mono text-sm" disabled={!!editingProperty} />
                         </div>
                         <div className="space-y-2">
                           <Label>类型</Label>
@@ -334,15 +492,29 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label>基础列</Label>
-                          <Input value={newPropBaseCol} onChange={e => setNewPropBaseCol(e.target.value)} placeholder="例如：email_address" className="font-mono text-sm" />
+                          <Label>是否主键</Label>
+                          <Select value={newPropIsPrimaryKey} onValueChange={setNewPropIsPrimaryKey}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="0">否</SelectItem>
+                              <SelectItem value="1">是</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>描述</Label>
+                          <Input value={newPropDesc} onChange={e => setNewPropDesc(e.target.value)} placeholder="例如：业务唯一标识" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>数据源列</Label>
+                          <Input value={newPropBaseCol} onChange={e => setNewPropBaseCol(e.target.value)} placeholder="例如：email_address（底层表字段名）" className="font-mono text-sm" />
                         </div>
                       </div>
                       <DialogFooter>
-                        <Button variant="outline" onClick={() => setPropDialogOpen(false)}>取消</Button>
-                        <Button onClick={handleAddProperty} disabled={addingProp}>
+                        <Button variant="outline" onClick={() => { setPropDialogOpen(false); resetPropertyForm(); }}>取消</Button>
+                        <Button onClick={editingProperty ? handleSaveProperty : handleAddProperty} disabled={addingProp}>
                           {addingProp ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
-                          添加属性
+                          {editingProperty ? '保存修改' : '添加属性'}
                         </Button>
                       </DialogFooter>
                     </DialogContent>
@@ -378,10 +550,16 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
                         ))}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50"
-                          onClick={() => handleDeleteProperty(prop)}>
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-400 hover:text-blue-600 hover:bg-blue-50"
+                            onClick={() => openEditPropertyDialog(prop)}>
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50"
+                            onClick={() => handleDeleteProperty(prop)}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -394,6 +572,191 @@ export function ObjectTypes({ data, onUpdate }: { data: OntologyData, onUpdate: 
                   )}
                 </TableBody>
               </Table>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="interfaces">
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+                <div>
+                  <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                    <Layers3 className="w-4 h-4 text-slate-500" />
+                    Implements Interfaces ({implementedInterfaces.length})
+                  </h3>
+                  <p className="text-sm text-slate-500 mt-1">为当前 Object Type 配置 Interface 实现关系与属性映射。</p>
+                </div>
+                <Dialog open={implementationDialogOpen} onOpenChange={setImplementationDialogOpen}>
+                  <Button size="sm" variant="outline" className="h-8 gap-1" onClick={openCreateImplementationDialog}>
+                    <Plus className="w-3 h-3" /> 实现 Interface
+                  </Button>
+                  <DialogContent className="max-w-3xl">
+                    <DialogHeader>
+                      <DialogTitle>{editingImplementation ? '编辑 Interface 实现' : '实现 Interface'}</DialogTitle>
+                      <DialogDescription>
+                        为 {syncedSelected.name} 选择一个 Interface，并完成必填属性映射。
+                      </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-5 py-4">
+                      <div className="space-y-2">
+                        <Label>Interface *</Label>
+                        <Select value={selectedInterfaceId} onValueChange={setSelectedInterfaceId} disabled={!!editingImplementation}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="选择 Interface..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableInterfaces.map((item) => (
+                              <SelectItem key={item.id} value={item.id}>
+                                {item.name} ({item.id})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {selectedInterfaceProperties.length > 0 && (
+                        <div className="space-y-3">
+                          <div>
+                            <h4 className="font-medium text-slate-900">属性映射</h4>
+                            <p className="text-sm text-slate-500">必填属性需要映射到当前 Object Type 的本地属性。</p>
+                          </div>
+                          <div className="border border-slate-200 rounded-lg overflow-hidden">
+                            <Table>
+                              <TableHeader className="bg-slate-50">
+                                <TableRow>
+                                  <TableHead>Interface 属性</TableHead>
+                                  <TableHead>映射到本地属性</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {selectedInterfaceProperties.map((property: InterfaceProperty) => (
+                                  <TableRow key={property.id}>
+                                    <TableCell>
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium text-slate-900">{property.name}</span>
+                                        {property.required ? (
+                                          <Badge variant="destructive" className="text-[10px] h-5">必填</Badge>
+                                        ) : (
+                                          <Badge variant="outline" className="text-[10px] h-5">选填</Badge>
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-slate-500 mt-1 font-mono">{property.id}</div>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Select
+                                        value={interfacePropertyMappings[property.id] || '__UNMAPPED__'}
+                                        onValueChange={(value) => setInterfacePropertyMappings((current) => ({
+                                          ...current,
+                                          [property.id]: value === '__UNMAPPED__' ? '' : value,
+                                        }))}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="选择本地属性..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="__UNMAPPED__">不映射</SelectItem>
+                                          {selectedProperties.map((candidate) => (
+                                            <SelectItem key={candidate.id} value={candidate.id}>
+                                              {candidate.name} ({candidate.id})
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setImplementationDialogOpen(false)}>取消</Button>
+                      <Button onClick={handleSaveImplementation} disabled={savingImplementation}>
+                        {savingImplementation ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+                        保存
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+
+              <div className="p-4 space-y-4">
+                {implementedInterfaces.length === 0 ? (
+                  <div className="border border-dashed border-slate-200 rounded-lg p-8 text-center text-slate-400">
+                    <Layers3 className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">当前还没有实现任何 Interface</p>
+                  </div>
+                ) : implementedInterfaces.map((implementation) => {
+                  const mappedPropertyIds = new Set((implementation.propertyMappings || []).map((item) => item.interfacePropertyId));
+                  const requiredProperties = (implementation.interfaceProperties || []).filter((item) => item.required);
+                  const missingRequiredCount = requiredProperties.filter((item) => !mappedPropertyIds.has(item.id)).length;
+
+                  return (
+                    <div key={implementation.id} className="border border-slate-200 rounded-lg p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-semibold text-slate-900">{implementation.interfaceName || implementation.interfaceId}</h4>
+                            <Badge variant={implementation.status === 'active' ? 'secondary' : 'outline'}>
+                              {implementation.status || 'pending'}
+                            </Badge>
+                            {implementation.mappingComplete ? (
+                              <Badge variant="outline" className="border-emerald-200 text-emerald-700">
+                                <CheckCircle2 className="w-3 h-3 mr-1" />
+                                必填映射完整
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="border-amber-200 text-amber-700">
+                                <AlertCircle className="w-3 h-3 mr-1" />
+                                缺少 {missingRequiredCount} 个必填映射
+                              </Badge>
+                            )}
+                          </div>
+                          {implementation.interfaceDescription && (
+                            <p className="text-sm text-slate-500 mt-1">{implementation.interfaceDescription}</p>
+                          )}
+                          <p className="text-xs text-slate-400 mt-2">
+                            已映射 {(implementation.propertyMappings || []).length} / {(implementation.interfaceProperties || []).length} 个属性
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="outline" onClick={() => openEditImplementationDialog(implementation)}>
+                            编辑映射
+                          </Button>
+                          <Button size="sm" variant="outline" className="text-red-500 border-red-200 hover:bg-red-50" onClick={() => handleDeleteImplementation(implementation)}>
+                            <Trash2 className="w-3.5 h-3.5 mr-1" />
+                            删除
+                          </Button>
+                        </div>
+                      </div>
+
+                      {(implementation.propertyMappings || []).length > 0 && (
+                        <div className="mt-4 border border-slate-100 rounded-md overflow-hidden">
+                          <Table>
+                            <TableHeader className="bg-slate-50">
+                              <TableRow>
+                                <TableHead>Interface 属性</TableHead>
+                                <TableHead>本地属性</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {(implementation.propertyMappings || []).map((mapping) => (
+                                <TableRow key={mapping.id}>
+                                  <TableCell className="font-medium">{mapping.interfacePropertyName || mapping.interfacePropertyId}</TableCell>
+                                  <TableCell>{mapping.propertyName || mapping.propertyId}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </TabsContent>
 

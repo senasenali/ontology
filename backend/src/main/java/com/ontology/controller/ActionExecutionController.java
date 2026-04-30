@@ -201,9 +201,12 @@ public class ActionExecutionController {
             }
 
             // 从 interfaceUrl 中提取对象类型ID
-            // URL格式: /api/instances/{objectTypeId}
-            String url = rule.getInterfaceUrl();
-            String objectTypeId = url.substring(url.lastIndexOf("/") + 1);
+            String objectTypeId = extractObjectTypeId(rule.getInterfaceUrl());
+            if (objectTypeId == null) {
+                result.put("status", "failed");
+                result.put("error", "Invalid object rule URL: " + rule.getInterfaceUrl());
+                return result;
+            }
 
             // 查询对象类型
             ObjectType objectType = objectTypeMapper.selectById(objectTypeId);
@@ -294,13 +297,69 @@ public class ActionExecutionController {
                 result.put("message", "Instance created successfully");
                 
             } else if ("UPDATE_OBJECT".equals(ruleCategory)) {
-                // TODO: 实现更新逻辑
-                result.put("status", "success");
-                result.put("message", "Update not fully implemented");
+                Property pkProp = findPrimaryKeyProperty(properties);
+                if (pkProp == null || pkProp.getBaseColumn() == null || pkProp.getBaseColumn().isEmpty()) {
+                    result.put("status", "failed");
+                    result.put("error", "No primary key property found");
+                    return result;
+                }
+
+                Object targetInstanceId = firstNonBlank(
+                        stringValue(parameters.get("instanceId")),
+                        stringValue(parameters.get("id")),
+                        ruleParamDefaults.get("instanceId")
+                );
+                if (targetInstanceId == null) {
+                    result.put("status", "failed");
+                    result.put("error", "instanceId is required");
+                    return result;
+                }
+
+                List<String> setClauses = new ArrayList<>();
+                List<Object> values = new ArrayList<>();
+                for (Property prop : properties) {
+                    if (prop.getBaseColumn() == null || prop.getBaseColumn().isEmpty()) continue;
+                    if (prop.getIsPrimaryKey() != null && prop.getIsPrimaryKey() == 1) continue;
+                    Object value = insertData.get(prop.getId());
+                    if (value != null) {
+                        setClauses.add("`" + prop.getBaseColumn() + "` = ?");
+                        values.add(value);
+                    }
+                }
+                setClauses.add("`updated_at` = ?");
+                values.add(LocalDateTime.now());
+                values.add(targetInstanceId);
+
+                String sql = String.format("UPDATE `%s` SET %s WHERE `%s` = ?",
+                        tableName,
+                        String.join(", ", setClauses),
+                        pkProp.getBaseColumn());
+                int rows = jdbcTemplate.update(sql, values.toArray());
+                result.put("status", rows > 0 ? "success" : "failed");
+                result.put("message", rows > 0 ? "Instance updated successfully" : "Instance not found");
             } else if ("DELETE_OBJECT".equals(ruleCategory)) {
-                // TODO: 实现删除逻辑
-                result.put("status", "success");
-                result.put("message", "Delete not fully implemented");
+                Property pkProp = findPrimaryKeyProperty(properties);
+                if (pkProp == null || pkProp.getBaseColumn() == null || pkProp.getBaseColumn().isEmpty()) {
+                    result.put("status", "failed");
+                    result.put("error", "No primary key property found");
+                    return result;
+                }
+
+                Object targetInstanceId = firstNonBlank(
+                        stringValue(parameters.get("instanceId")),
+                        stringValue(parameters.get("id")),
+                        ruleParamDefaults.get("instanceId")
+                );
+                if (targetInstanceId == null) {
+                    result.put("status", "failed");
+                    result.put("error", "instanceId is required");
+                    return result;
+                }
+
+                String sql = String.format("DELETE FROM `%s` WHERE `%s` = ?", tableName, pkProp.getBaseColumn());
+                int rows = jdbcTemplate.update(sql, targetInstanceId);
+                result.put("status", rows > 0 ? "success" : "failed");
+                result.put("message", rows > 0 ? "Instance deleted successfully" : "Instance not found");
             } else {
                 result.put("status", "failed");
                 result.put("error", "Rule category not supported: " + ruleCategory);
@@ -581,6 +640,28 @@ public class ActionExecutionController {
                 """;
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, linkTypeId);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private String extractObjectTypeId(String interfaceUrl) {
+        String normalized = stringValue(interfaceUrl);
+        if (normalized == null) return null;
+        String prefix = "/api/instances/";
+        int index = normalized.indexOf(prefix);
+        if (index < 0) return null;
+        String tail = normalized.substring(index + prefix.length());
+        int slash = tail.indexOf("/");
+        if (slash >= 0) {
+            tail = tail.substring(0, slash);
+        }
+        return tail.isEmpty() || tail.contains("{") ? null : tail;
+    }
+
+    private Property findPrimaryKeyProperty(List<Property> properties) {
+        if (properties == null || properties.isEmpty()) return null;
+        return properties.stream()
+                .filter(p -> p.getIsPrimaryKey() != null && p.getIsPrimaryKey() == 1)
+                .findFirst()
+                .orElse(properties.get(0));
     }
 
     private void validateLinkEndpointExists(String tableName, String columnName, String instanceId, String errorMessage) {

@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900" role="img" aria-label="本体图谱项目截图风格示意">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <style>
+      .bg{fill:#f8fafc}.side{fill:#fff}.top{fill:#fff}.line{stroke:#e2e8f0}
+      .nav{font:600 18px 'IBM Plex Sans SC','PingFang SC',sans-serif;fill:#334155}
+      .nav-small{font:500 14px 'IBM Plex Sans SC','PingFang SC',sans-serif;fill:#64748b}
+      .title{font:800 24px 'IBM Plex Sans SC','PingFang SC',sans-serif;fill:#0f172a}
+      .sub{font:500 15px 'IBM Plex Sans SC','PingFang SC',sans-serif;fill:#64748b}
+      .node-title{font:800 17px 'IBM Plex Sans SC','PingFang SC',sans-serif;fill:#0f172a}
+      .node-id{font:500 12px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#94a3b8}
+      .prop{font:500 13px 'IBM Plex Sans SC','PingFang SC',sans-serif;fill:#334155}
+      .tag{font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#64748b}
+      .edge{fill:none;stroke:#2563eb;stroke-width:3;marker-end:url(#arrow)}
+      .edge-label{font:700 13px 'IBM Plex Sans SC','PingFang SC',sans-serif;fill:#1d4ed8}
+    </style>
+  </defs>
+  <rect class="bg" width="1400" height="900"/>
+  <rect class="side" width="256" height="900"/>
+  <rect class="top" x="256" width="1144" height="56"/>
+  <line class="line" x1="256" y1="0" x2="256" y2="900"/>
+  <line class="line" x1="0" y1="56" x2="1400" y2="56"/>
+  <text class="nav" x="52" y="28">Ontology平台</text>
+  <text class="nav-small" x="52" y="46">集成DeepSeek</text>
+  <text class="nav-small" x="24" y="84">生产环境</text>
+  <rect x="12" y="136" width="232" height="38" rx="0" fill="#eff6ff"/>
+  <text class="nav" x="52" y="161" fill="#2563eb">本体图谱</text>
+  <text class="nav" x="52" y="119">仪表盘</text>
+  <text class="nav" x="52" y="201">对象</text>
+  <text class="nav" x="52" y="242">链接</text>
+  <text class="nav" x="52" y="283">动作</text>
+  <text class="nav" x="52" y="324">函数</text>
+  <rect x="280" y="10" width="384" height="36" rx="0" fill="#f1f5f9"/>
+  <text class="sub" x="318" y="33">搜索对象类型、链接或属性...</text>
+  <text class="title" x="304" y="112">本体图谱</text>
+  <text class="sub" x="304" y="139">点击任意实体查看其详情和关系。通过链接导航探索图谱。</text>
+  <rect x="304" y="166" width="1032" height="648" rx="10" fill="#ffffff" stroke="#e2e8f0"/>
+  <path class="edge" d="M520 366 C600 318 660 318 742 356"/>
+  <path class="edge" d="M944 374 C854 464 806 500 712 534"/>
+  <path class="edge" d="M514 568 C604 552 652 548 742 548"/>
+  <path class="edge" d="M942 586 C1048 590 1102 548 1168 492"/>
+  <text class="edge-label" x="604" y="318">生产碳酸锂</text>
+  <text class="edge-label" x="790" y="470">消耗碳酸锂</text>
+  <text class="edge-label" x="603" y="590">电芯由正极材料组成</text>
+  <text class="edge-label" x="1012" y="628">电池装载于整车</text>
+
+  <g filter="url(#shadow)">
+    <rect x="366" y="270" width="250" height="176" rx="12" fill="#fff" stroke="#bfdbfe" stroke-width="2"/>
+    <rect x="382" y="286" width="40" height="40" rx="10" fill="#dbeafe"/>
+    <circle cx="402" cy="306" r="9" fill="#2563eb"/>
+    <text class="node-title" x="434" y="302">公司</text>
+    <text class="node-id" x="434" y="322">company_entity</text>
+    <line x1="366" y1="338" x2="616" y2="338" stroke="#f1f5f9"/>
+    <text class="tag" x="386" y="363">属性 (5)</text>
+    <text class="prop" x="386" y="389">公司ID · string</text>
+    <text class="prop" x="386" y="414">公司名称 · string</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="742" y="282" width="250" height="176" rx="12" fill="#fff" stroke="#bbf7d0" stroke-width="2"/>
+    <rect x="758" y="298" width="40" height="40" rx="10" fill="#dcfce7"/>
+    <circle cx="778" cy="318" r="9" fill="#16a34a"/>
+    <text class="node-title" x="810" y="314">碳酸锂</text>
+    <text class="node-id" x="810" y="334">lithium_carbonate</text>
+    <line x1="742" y1="350" x2="992" y2="350" stroke="#f1f5f9"/>
+    <text class="tag" x="762" y="375">属性 (4)</text>
+    <text class="prop" x="762" y="401">价格 · number</text>
+    <text class="prop" x="762" y="426">纯度 · string</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="742" y="514" width="250" height="176" rx="12" fill="#fff" stroke="#fed7aa" stroke-width="2"/>
+    <rect x="758" y="530" width="40" height="40" rx="10" fill="#ffedd5"/>
+    <circle cx="778" cy="550" r="9" fill="#f97316"/>
+    <text class="node-title" x="810" y="546">正极材料</text>
+    <text class="node-id" x="810" y="566">cathode_material</text>
+    <line x1="742" y1="582" x2="992" y2="582" stroke="#f1f5f9"/>
+    <text class="tag" x="762" y="607">属性 (5)</text>
+    <text class="prop" x="762" y="633">材料ID · string</text>
+    <text class="prop" x="762" y="658">材料类型 · string</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="366" y="514" width="250" height="176" rx="12" fill="#fff" stroke="#ddd6fe" stroke-width="2"/>
+    <rect x="382" y="530" width="40" height="40" rx="10" fill="#ede9fe"/>
+    <circle cx="402" cy="550" r="9" fill="#7c3aed"/>
+    <text class="node-title" x="434" y="546">电芯</text>
+    <text class="node-id" x="434" y="566">battery_cell</text>
+    <line x1="366" y1="582" x2="616" y2="582" stroke="#f1f5f9"/>
+    <text class="tag" x="386" y="607">属性 (5)</text>
+    <text class="prop" x="386" y="633">电芯ID · string</text>
+    <text class="prop" x="386" y="658">容量 · number</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1082" y="438" width="250" height="176" rx="12" fill="#fff" stroke="#bae6fd" stroke-width="2"/>
+    <rect x="1098" y="454" width="40" height="40" rx="10" fill="#e0f2fe"/>
+    <circle cx="1118" cy="474" r="9" fill="#0284c7"/>
+    <text class="node-title" x="1150" y="470">新能源整车</text>
+    <text class="node-id" x="1150" y="490">new_energy_vehicle</text>
+    <line x1="1082" y1="506" x2="1332" y2="506" stroke="#f1f5f9"/>
+    <text class="tag" x="1102" y="531">属性 (5)</text>
+    <text class="prop" x="1102" y="557">车型ID · string</text>
+    <text class="prop" x="1102" y="582">售价 · number</text>
+  </g>
+</svg>

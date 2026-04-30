@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Database, Link as LinkIcon, Network, Settings, Search, Bell, UserCircle, PlayCircle, Save, CheckCircle2, Sparkles, Bot, Building2, Compass, Code, ChevronDown, ChevronRight, Shield } from 'lucide-react';
+import { LayoutDashboard, Database, Boxes, Link as LinkIcon, Network, Settings, Search, Bell, UserCircle, PlayCircle, Save, CheckCircle2, Sparkles, Bot, Building2, Compass, Code, ChevronDown, ChevronRight, Shield } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { Button } from '@/src/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/src/components/ui/popover';
@@ -12,6 +12,8 @@ interface LayoutProps {
   children: React.ReactNode;
   activeTab: string;
   onNavigate: (tab: string) => void;
+  currentProjectId: string;
+  onProjectChange: (projectId: string) => void;
   ontologyData?: OntologyData;
   onUpdate?: (data: OntologyData) => void;
 }
@@ -22,6 +24,7 @@ const navItems = [
   { id: 'objects', label: '对象', icon: Database, children: [
     { id: 'objects', label: '对象类型', icon: Database },
     { id: 'explorer', label: '对象浏览器', icon: Compass },
+    { id: 'interfaces', label: '接口类型', icon: Boxes },
   ]},
   { id: 'links', label: '链接', icon: LinkIcon, children: [
     { id: 'links', label: '链接类型', icon: LinkIcon },
@@ -37,10 +40,11 @@ const navItems = [
   { id: 'settings', label: '设置', icon: Settings },
 ];
 
-export function Layout({ children, activeTab, onNavigate, ontologyData, onUpdate }: LayoutProps) {
+export function Layout({ children, activeTab, onNavigate, currentProjectId, onProjectChange, ontologyData, onUpdate }: LayoutProps) {
   const [pendingChanges, setPendingChanges] = useState(0);
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
+  const [projects, setProjects] = useState<any[]>([]);
   
   // 通知相关状态
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -61,6 +65,12 @@ export function Layout({ children, activeTab, onNavigate, ontologyData, onUpdate
     const interval = setInterval(loadPendingCount, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    api.getProjects()
+      .then(res => setProjects(res.projects || []))
+      .catch(err => console.error('Failed to load projects:', err));
+  }, [currentProjectId]);
 
   // 加载通知数据
   useEffect(() => {
@@ -167,6 +177,35 @@ export function Layout({ children, activeTab, onNavigate, ontologyData, onUpdate
     }
   };
 
+  const handleCreateProject = async () => {
+    const name = window.prompt('请输入项目名称');
+    if (!name || !name.trim()) return;
+    try {
+      const res = await api.createProject(name.trim());
+      setProjects(res.projects || []);
+      onProjectChange(res.project.id);
+      toast.success('项目已创建');
+    } catch (err: any) {
+      toast.error(err.message || '创建项目失败');
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    if (currentProjectId === 'project_public') {
+      toast.error('公共项目不可删除');
+      return;
+    }
+    if (!window.confirm('确定删除当前项目吗？')) return;
+    try {
+      const res = await api.deleteProject(currentProjectId);
+      setProjects(res.projects || []);
+      onProjectChange('project_public');
+      toast.success('项目已删除');
+    } catch (err: any) {
+      toast.error(err.message || '删除项目失败');
+    }
+  };
+
   return (
     <div className="flex h-screen w-full bg-[#F8F9FA] text-slate-900 font-sans">
       {/* Sidebar */}
@@ -178,6 +217,24 @@ export function Layout({ children, activeTab, onNavigate, ontologyData, onUpdate
               <span className="font-bold text-sm tracking-tight">Ontology平台</span>
               <span className="text-xs text-blue-500/80">（集成DeepSeek）</span>
             </div>
+          </div>
+        </div>
+        <div className="px-4 py-3 border-b border-slate-200 space-y-2">
+          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">当前项目</div>
+          <select
+            value={currentProjectId}
+            onChange={(e) => onProjectChange(e.target.value)}
+            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+          >
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="flex-1" onClick={handleCreateProject}>新建</Button>
+            <Button variant="outline" size="sm" className="flex-1" onClick={handleDeleteProject} disabled={currentProjectId === 'project_public'}>删除</Button>
           </div>
         </div>
         

@@ -2,8 +2,20 @@ import { OntologyData, IndustryCategory } from '@/src/store/ontologyStore';
 
 const API_BASE = '/api';
 
+let currentProjectId =
+  typeof window !== 'undefined'
+    ? window.localStorage.getItem('currentProjectId') || 'project_public'
+    : 'project_public';
+
+function withProjectId(url: string) {
+  const hasQuery = url.includes('?');
+  const hasProject = url.includes('projectId=');
+  if (hasProject) return url;
+  return `${url}${hasQuery ? '&' : '?'}projectId=${encodeURIComponent(currentProjectId)}`;
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${url}`, {
+  const response = await fetch(`${API_BASE}${withProjectId(url)}`, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
@@ -22,14 +34,119 @@ export interface ConversationResponse {
 }
 
 export const api = {
+  setCurrentProjectId: (projectId: string) => {
+    currentProjectId = projectId || 'project_public';
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('currentProjectId', currentProjectId);
+    }
+  },
+
+  getCurrentProjectId: () => currentProjectId,
+
   // ── Ontology ───────────────────────────────────────────────────────────────
   getOntology: () =>
     request<OntologyData>('/ontology'),
+
+  getProjects: () =>
+    request<{ success: boolean; projects: any[] }>('/projects'),
+
+  createProject: (name: string, description = '') =>
+    request<{ success: boolean; project: any; projects: any[] }>('/projects', {
+      method: 'POST',
+      body: JSON.stringify({ name, description }),
+    }),
+
+  deleteProject: (id: string) =>
+    request<{ success: boolean; projects: any[] }>(`/projects/${id}`, {
+      method: 'DELETE',
+    }),
 
   importOntology: (objectTypes: any[], linkTypes: any[]) =>
     request<{ success: boolean; data: OntologyData }>('/ontology/import', {
       method: 'POST',
       body: JSON.stringify({ objectTypes, linkTypes }),
+    }),
+
+  // ── Interfaces ─────────────────────────────────────────────────────────────
+  getInterfaces: () =>
+    request<{ success: boolean; interfaces: any[] }>('/interfaces'),
+
+  getInterfaceDetail: (id: string) =>
+    request<{ success: boolean; interface: any }>(`/interfaces/${id}`),
+
+  createInterface: (data: {
+    id: string; name: string; description?: string; industryId?: string | null; status?: string;
+  }) =>
+    request<{ success: boolean; data: OntologyData }>('/interfaces', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateInterface: (id: string, data: Partial<{
+    name: string; description: string; industryId: string | null; status: string;
+  }>) =>
+    request<{ success: boolean; data: OntologyData }>(`/interfaces/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteInterface: (id: string) =>
+    request<{ success: boolean; data: OntologyData }>(`/interfaces/${id}`, {
+      method: 'DELETE',
+    }),
+
+  addInterfaceProperty: (interfaceId: string, data: any) =>
+    request<{ success: boolean; data: OntologyData }>(`/interfaces/${interfaceId}/properties`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateInterfaceProperty: (interfaceId: string, propertyId: string, data: any) =>
+    request<{ success: boolean; data: OntologyData }>(`/interfaces/${interfaceId}/properties/${propertyId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteInterfaceProperty: (interfaceId: string, propertyId: string) =>
+    request<{ success: boolean; data: OntologyData }>(`/interfaces/${interfaceId}/properties/${propertyId}`, {
+      method: 'DELETE',
+    }),
+
+  addInterfaceLinkTypeConstraint: (interfaceId: string, data: any) =>
+    request<{ success: boolean; data: OntologyData }>(`/interfaces/${interfaceId}/link-type-constraints`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateInterfaceLinkTypeConstraint: (interfaceId: string, constraintId: string, data: any) =>
+    request<{ success: boolean; data: OntologyData }>(`/interfaces/${interfaceId}/link-type-constraints/${constraintId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteInterfaceLinkTypeConstraint: (interfaceId: string, constraintId: string) =>
+    request<{ success: boolean; data: OntologyData }>(`/interfaces/${interfaceId}/link-type-constraints/${constraintId}`, {
+      method: 'DELETE',
+    }),
+
+  getObjectTypeInterfaces: (objectTypeId: string) =>
+    request<{ success: boolean; interfaces: any[] }>(`/object-types/${objectTypeId}/interfaces`),
+
+  createObjectTypeInterface: (objectTypeId: string, data: any) =>
+    request<{ success: boolean; data: OntologyData }>(`/object-types/${objectTypeId}/interfaces`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateObjectTypeInterface: (objectTypeId: string, mappingId: string, data: any) =>
+    request<{ success: boolean; data: OntologyData }>(`/object-types/${objectTypeId}/interfaces/${mappingId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteObjectTypeInterface: (objectTypeId: string, mappingId: string) =>
+    request<{ success: boolean; data: OntologyData }>(`/object-types/${objectTypeId}/interfaces/${mappingId}`, {
+      method: 'DELETE',
     }),
 
   // ── Object Types ───────────────────────────────────────────────────────────
@@ -305,17 +422,45 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  calculateObjectTypePriceTransmission: (data: {
-    objectTypeId: string;
+  calculateInstancePriceTransmission: (data: {
+    sourceObjectTypeId?: string;
+    objectTypeId?: string;
+    sourceInstanceId?: string;
+    instanceId?: string;
+    priceChangePercent?: number;
+    latestPrice?: number;
+    previousPrice?: number;
+    depth?: number;
+    direction?: 'downstream';
+  }) =>
+    request<{ success: boolean; data: any; error?: string }>('/analysis/price-transmission', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  calculateConceptPriceTransmission: (data: {
+    objectTypeId?: string;
+    sourceObjectTypeId?: string;
     priceChangePercent: number;
     previousPrice?: number;
     latestPrice?: number;
     depth?: number;
+    direction?: 'downstream';
   }) =>
     request<{ success: boolean; data: any; error?: string }>('/analysis/price-transmission/object-type', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  calculateObjectTypePriceTransmission: (data: {
+    objectTypeId?: string;
+    sourceObjectTypeId?: string;
+    priceChangePercent: number;
+    previousPrice?: number;
+    latestPrice?: number;
+    depth?: number;
+    direction?: 'downstream';
+  }) => api.calculateConceptPriceTransmission(data),
 
   // ── Event Tracking ────────────────────────────────────────────────────────
   getTrackedEvents: () =>
@@ -432,15 +577,19 @@ export const api = {
     request<{
       objectTypes: any[];
       linkTypes: any[];
+      interfaces: any[];
+      objectTypeInterfaceMappings: any[];
       totalObjectTypes: number;
       totalLinkTypes: number;
+      totalInterfaces: number;
+      totalObjectTypeInterfaceMappings: number;
       total: number;
       page: number;
       pageSize: number;
     }>(`/review/pending?page=${page}&pageSize=${pageSize}`),
 
   getPendingReviewCount: () =>
-    request<{ total: number; objectTypes: number; linkTypes: number }>('/review/count'),
+    request<{ total: number; objectTypes: number; linkTypes: number; interfaces: number; objectTypeInterfaceMappings: number }>('/review/count'),
 
   approveObjectType: (id: string) =>
     request<{ success: boolean; message: string; data: any }>(`/review/object-types/${id}/approve`, {
@@ -459,6 +608,26 @@ export const api = {
 
   rejectLinkType: (id: string) =>
     request<{ success: boolean; message: string; data: any }>(`/review/link-types/${id}/reject`, {
+      method: 'POST',
+    }),
+
+  approveInterface: (id: string) =>
+    request<{ success: boolean; message: string; data: any }>(`/review/interfaces/${id}/approve`, {
+      method: 'POST',
+    }),
+
+  rejectInterface: (id: string) =>
+    request<{ success: boolean; message: string; data: any }>(`/review/interfaces/${id}/reject`, {
+      method: 'POST',
+    }),
+
+  approveObjectTypeInterfaceMapping: (id: string) =>
+    request<{ success: boolean; message: string; data: any }>(`/review/object-type-interface-mappings/${id}/approve`, {
+      method: 'POST',
+    }),
+
+  rejectObjectTypeInterfaceMapping: (id: string) =>
+    request<{ success: boolean; message: string; data: any }>(`/review/object-type-interface-mappings/${id}/reject`, {
       method: 'POST',
     }),
 
@@ -484,6 +653,11 @@ export const api = {
   deleteOntologyRule: (id: string) =>
     request<{ success: boolean }>(`/ontology-rules/${id}`, {
       method: 'DELETE',
+    }),
+
+  syncOntologyRules: () =>
+    request<{ success: boolean }>('/ontology-rules/sync-all', {
+      method: 'POST',
     }),
 
   // ── Notifications ─────────────────────────────────────────────────────────
