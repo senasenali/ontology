@@ -21,4 +21,6 @@ public class ActionEffect {
     private Integer isEnabled;
     
     private Integer sortOrder;
+
+    private String projectId;
 }

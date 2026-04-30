@@ -17,6 +17,7 @@ import com.ontology.mapper.InterfacePropertyMappingMapper;
 import com.ontology.mapper.ObjectTypeInterfaceMappingMapper;
 import com.ontology.mapper.ObjectTypeMapper;
 import com.ontology.mapper.PropertyMapper;
+import com.ontology.project.ProjectScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,8 +44,9 @@ public class InterfaceService {
     private final PropertyMapper propertyMapper;
     private final ObjectTypeInterfaceMappingMapper objectTypeInterfaceMappingMapper;
 
-    public List<OntologyInterface> listOntologyInterfaces() {
-        List<OntologyInterface> interfaces = interfaceMapper.selectAllOrdered();
+    public List<OntologyInterface> listOntologyInterfaces(String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        List<OntologyInterface> interfaces = interfaceMapper.selectAllOrdered(projectId);
         return enrichInterfaces(interfaces, false);
     }
 
@@ -60,48 +62,53 @@ public class InterfaceService {
         return enrichInterfaces(interfaces, false);
     }
 
-    public OntologyInterface getInterfaceDetail(String id) {
-        OntologyInterface ontologyInterface = requireInterface(id);
+    public OntologyInterface getInterfaceDetail(String id, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        OntologyInterface ontologyInterface = requireInterface(id, projectId);
         hydrateInterface(ontologyInterface, true);
-        ontologyInterface.setProperties(buildEffectiveProperties(id));
-        ontologyInterface.setLinkTypeConstraints(buildEffectiveLinkTypeConstraints(id));
+        ontologyInterface.setProperties(buildEffectiveProperties(id, projectId));
+        ontologyInterface.setLinkTypeConstraints(buildEffectiveLinkTypeConstraints(id, projectId));
         return ontologyInterface;
     }
 
     @Transactional
-    public OntologyInterface createInterface(OntologyInterface request) {
-        validateInterfaceForCreate(request);
+    public OntologyInterface createInterface(OntologyInterface request, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        validateInterfaceForCreate(request, projectId);
         if (isBlank(request.getStatus())) {
             request.setStatus("pending");
         }
+        request.setProjectId(projectId);
         interfaceMapper.insert(request);
-        return getInterfaceDetail(request.getId());
+        return getInterfaceDetail(request.getId(), projectId);
     }
 
     @Transactional
-    public OntologyInterface updateInterface(String id, OntologyInterface request) {
-        OntologyInterface existing = requireInterface(id);
+    public OntologyInterface updateInterface(String id, OntologyInterface request, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        OntologyInterface existing = requireInterface(id, projectId);
         existing.setName(firstNonBlank(request.getName(), existing.getName()));
         existing.setDescription(request.getDescription() != null ? request.getDescription() : existing.getDescription());
         existing.setIndustryId(request.getIndustryId() != null ? request.getIndustryId() : existing.getIndustryId());
         existing.setStatus(firstNonBlank(request.getStatus(), existing.getStatus()));
         validateInterfaceForUpdate(existing);
         interfaceMapper.updateById(existing);
-        return getInterfaceDetail(id);
+        return getInterfaceDetail(id, projectId);
     }
 
     @Transactional
-    public void deleteInterface(String id) {
-        requireInterface(id);
-        List<InterfaceExtends> childRelations = interfaceExtendsMapper.selectByParentInterfaceId(id);
+    public void deleteInterface(String id, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireInterface(id, projectId);
+        List<InterfaceExtends> childRelations = interfaceExtendsMapper.selectByParentInterfaceId(id, projectId);
         if (!childRelations.isEmpty()) {
             throw new IllegalArgumentException("请先解除子 Interface 的继承关系");
         }
-        Long mappingCount = objectTypeInterfaceMappingMapper.countByInterfaceId(id);
+        Long mappingCount = objectTypeInterfaceMappingMapper.countByInterfaceId(id, projectId);
         if (mappingCount != null && mappingCount > 0) {
             throw new IllegalArgumentException("请先移除 Object Type 的实现关系");
         }
-        InterfaceExtends parentRelation = interfaceExtendsMapper.selectByChildInterfaceId(id);
+        InterfaceExtends parentRelation = interfaceExtendsMapper.selectByChildInterfaceId(id, projectId);
         if (parentRelation != null) {
             interfaceExtendsMapper.deleteById(parentRelation.getId());
         }
@@ -109,18 +116,21 @@ public class InterfaceService {
     }
 
     @Transactional
-    public InterfaceProperty addProperty(String interfaceId, InterfaceProperty property) {
-        requireInterface(interfaceId);
+    public InterfaceProperty addProperty(String interfaceId, InterfaceProperty property, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireInterface(interfaceId, projectId);
         validateProperty(property);
         property.setInterfaceId(interfaceId);
+        property.setProjectId(projectId);
         interfacePropertyMapper.insert(property);
         return property;
     }
 
     @Transactional
-    public InterfaceProperty updateProperty(String interfaceId, String propertyId, InterfaceProperty request) {
-        requireInterface(interfaceId);
-        InterfaceProperty existing = requireProperty(propertyId);
+    public InterfaceProperty updateProperty(String interfaceId, String propertyId, InterfaceProperty request, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireInterface(interfaceId, projectId);
+        InterfaceProperty existing = requireProperty(propertyId, projectId);
         if (!Objects.equals(existing.getInterfaceId(), interfaceId)) {
             throw new IllegalArgumentException("属性不属于该 Interface");
         }
@@ -135,9 +145,10 @@ public class InterfaceService {
     }
 
     @Transactional
-    public void deleteProperty(String interfaceId, String propertyId) {
-        requireInterface(interfaceId);
-        InterfaceProperty existing = requireProperty(propertyId);
+    public void deleteProperty(String interfaceId, String propertyId, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireInterface(interfaceId, projectId);
+        InterfaceProperty existing = requireProperty(propertyId, projectId);
         if (!Objects.equals(existing.getInterfaceId(), interfaceId)) {
             throw new IllegalArgumentException("属性不属于该 Interface");
         }
@@ -145,41 +156,46 @@ public class InterfaceService {
     }
 
     @Transactional
-    public OntologyInterface setExtends(String childInterfaceId, String parentInterfaceId) {
-        OntologyInterface child = requireInterface(childInterfaceId);
-        OntologyInterface parent = requireInterface(parentInterfaceId);
+    public OntologyInterface setExtends(String childInterfaceId, String parentInterfaceId, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        OntologyInterface child = requireInterface(childInterfaceId, projectId);
+        OntologyInterface parent = requireInterface(parentInterfaceId, projectId);
         if (Objects.equals(child.getId(), parent.getId())) {
             throw new IllegalArgumentException("Interface 不能继承自己");
         }
-        ensureNoCycle(childInterfaceId, parentInterfaceId);
-        InterfaceExtends relation = interfaceExtendsMapper.selectByChildInterfaceId(childInterfaceId);
+        ensureNoCycle(childInterfaceId, parentInterfaceId, projectId);
+        InterfaceExtends relation = interfaceExtendsMapper.selectByChildInterfaceId(childInterfaceId, projectId);
         if (relation == null) {
             relation = new InterfaceExtends();
             relation.setId(buildStableId("ie", childInterfaceId, parentInterfaceId));
             relation.setChildInterfaceId(childInterfaceId);
             relation.setParentInterfaceId(parentInterfaceId);
+            relation.setProjectId(projectId);
             interfaceExtendsMapper.insert(relation);
         } else {
             relation.setParentInterfaceId(parentInterfaceId);
             interfaceExtendsMapper.updateById(relation);
         }
-        return getInterfaceDetail(child.getId());
+        return getInterfaceDetail(child.getId(), projectId);
     }
 
     @Transactional
-    public OntologyInterface removeExtends(String childInterfaceId) {
-        requireInterface(childInterfaceId);
-        InterfaceExtends relation = interfaceExtendsMapper.selectByChildInterfaceId(childInterfaceId);
+    public OntologyInterface removeExtends(String childInterfaceId, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireInterface(childInterfaceId, projectId);
+        InterfaceExtends relation = interfaceExtendsMapper.selectByChildInterfaceId(childInterfaceId, projectId);
         if (relation != null) {
             interfaceExtendsMapper.deleteById(relation.getId());
         }
-        return getInterfaceDetail(childInterfaceId);
+        return getInterfaceDetail(childInterfaceId, projectId);
     }
 
     @Transactional
-    public InterfaceLinkConstraint addLinkTypeConstraint(String interfaceId, InterfaceLinkConstraint constraint) {
-        requireInterface(interfaceId);
+    public InterfaceLinkConstraint addLinkTypeConstraint(String interfaceId, InterfaceLinkConstraint constraint, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireInterface(interfaceId, projectId);
         constraint.setInterfaceId(interfaceId);
+        constraint.setProjectId(projectId);
         if (isBlank(constraint.getStatus())) {
             constraint.setStatus("pending");
         }
@@ -189,9 +205,10 @@ public class InterfaceService {
     }
 
     @Transactional
-    public InterfaceLinkConstraint updateLinkTypeConstraint(String interfaceId, String constraintId, InterfaceLinkConstraint request) {
-        requireInterface(interfaceId);
-        InterfaceLinkConstraint existing = requireLinkTypeConstraint(constraintId);
+    public InterfaceLinkConstraint updateLinkTypeConstraint(String interfaceId, String constraintId, InterfaceLinkConstraint request, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireInterface(interfaceId, projectId);
+        InterfaceLinkConstraint existing = requireLinkTypeConstraint(constraintId, projectId);
         if (!Objects.equals(existing.getInterfaceId(), interfaceId)) {
             throw new IllegalArgumentException("Link Type Constraint 不属于该 Interface");
         }
@@ -208,44 +225,47 @@ public class InterfaceService {
     }
 
     @Transactional
-    public void deleteLinkTypeConstraint(String interfaceId, String constraintId) {
-        requireInterface(interfaceId);
-        InterfaceLinkConstraint existing = requireLinkTypeConstraint(constraintId);
+    public void deleteLinkTypeConstraint(String interfaceId, String constraintId, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireInterface(interfaceId, projectId);
+        InterfaceLinkConstraint existing = requireLinkTypeConstraint(constraintId, projectId);
         if (!Objects.equals(existing.getInterfaceId(), interfaceId)) {
             throw new IllegalArgumentException("Link Type Constraint 不属于该 Interface");
         }
         interfaceLinkConstraintMapper.deleteById(constraintId);
     }
 
-    public List<ObjectTypeInterfaceMapping> listObjectTypeInterfaceMappings(String objectTypeId) {
-        requireObjectType(objectTypeId);
-        List<ObjectTypeInterfaceMapping> mappings = objectTypeInterfaceMappingMapper.selectByObjectTypeId(objectTypeId);
+    public List<ObjectTypeInterfaceMapping> listObjectTypeInterfaceMappings(String objectTypeId, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireObjectType(objectTypeId, projectId);
+        List<ObjectTypeInterfaceMapping> mappings = objectTypeInterfaceMappingMapper.selectByObjectTypeId(objectTypeId, projectId);
         return enrichObjectTypeInterfaceMappings(mappings);
     }
 
     @Transactional
-    public ObjectTypeInterfaceMapping saveObjectTypeInterfaceMapping(String objectTypeId, ObjectTypeInterfaceMapping request) {
-        ObjectType objectType = requireObjectType(objectTypeId);
+    public ObjectTypeInterfaceMapping saveObjectTypeInterfaceMapping(String objectTypeId, ObjectTypeInterfaceMapping request, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        ObjectType objectType = requireObjectType(objectTypeId, projectId);
         if (request == null || isBlank(request.getInterfaceId())) {
             throw new IllegalArgumentException("请选择要实现的 Interface");
         }
 
-        OntologyInterface ontologyInterface = requireInterface(request.getInterfaceId());
+        OntologyInterface ontologyInterface = requireInterface(request.getInterfaceId(), projectId);
         ObjectTypeInterfaceMapping existing = null;
         if (!isBlank(request.getId())) {
-            existing = requireObjectTypeInterfaceMapping(request.getId());
+            existing = requireObjectTypeInterfaceMapping(request.getId(), projectId);
             if (!Objects.equals(existing.getObjectTypeId(), objectTypeId)) {
                 throw new IllegalArgumentException("实现关系不属于该 Object Type");
             }
         } else {
-            for (ObjectTypeInterfaceMapping mapping : objectTypeInterfaceMappingMapper.selectByObjectTypeId(objectTypeId)) {
+            for (ObjectTypeInterfaceMapping mapping : objectTypeInterfaceMappingMapper.selectByObjectTypeId(objectTypeId, projectId)) {
                 if (Objects.equals(mapping.getInterfaceId(), request.getInterfaceId())) {
                     throw new IllegalArgumentException("该 Object Type 已实现此 Interface");
                 }
             }
         }
 
-        List<InterfaceProperty> effectiveProperties = buildEffectiveProperties(ontologyInterface.getId());
+        List<InterfaceProperty> effectiveProperties = buildEffectiveProperties(ontologyInterface.getId(), projectId);
         validatePropertyMappings(objectType, effectiveProperties, request.getPropertyMappings());
 
         ObjectTypeInterfaceMapping mapping = existing != null ? existing : new ObjectTypeInterfaceMapping();
@@ -254,20 +274,22 @@ public class InterfaceService {
             mapping.setObjectTypeId(objectTypeId);
             mapping.setInterfaceId(ontologyInterface.getId());
             mapping.setStatus(isBlank(request.getStatus()) ? "pending" : request.getStatus());
+            mapping.setProjectId(projectId);
             objectTypeInterfaceMappingMapper.insert(mapping);
         } else {
             mapping.setStatus(firstNonBlank(request.getStatus(), mapping.getStatus()));
             objectTypeInterfaceMappingMapper.updateById(mapping);
         }
 
-        replacePropertyMappings(mapping.getId(), request.getPropertyMappings());
-        return enrichObjectTypeInterfaceMapping(requireObjectTypeInterfaceMapping(mapping.getId()));
+        replacePropertyMappings(mapping.getId(), request.getPropertyMappings(), projectId);
+        return enrichObjectTypeInterfaceMapping(requireObjectTypeInterfaceMapping(mapping.getId(), projectId));
     }
 
     @Transactional
-    public void deleteObjectTypeInterfaceMapping(String objectTypeId, String mappingId) {
-        requireObjectType(objectTypeId);
-        ObjectTypeInterfaceMapping mapping = requireObjectTypeInterfaceMapping(mappingId);
+    public void deleteObjectTypeInterfaceMapping(String objectTypeId, String mappingId, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireObjectType(objectTypeId, projectId);
+        ObjectTypeInterfaceMapping mapping = requireObjectTypeInterfaceMapping(mappingId, projectId);
         if (!Objects.equals(mapping.getObjectTypeId(), objectTypeId)) {
             throw new IllegalArgumentException("实现关系不属于该 Object Type");
         }
@@ -275,41 +297,47 @@ public class InterfaceService {
     }
 
     @Transactional
-    public void approveObjectTypeInterfaceMapping(String id) {
-        ObjectTypeInterfaceMapping mapping = requireObjectTypeInterfaceMapping(id);
+    public void approveObjectTypeInterfaceMapping(String id, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        ObjectTypeInterfaceMapping mapping = requireObjectTypeInterfaceMapping(id, projectId);
         mapping.setStatus("active");
         objectTypeInterfaceMappingMapper.updateById(mapping);
     }
 
     @Transactional
-    public void rejectObjectTypeInterfaceMapping(String id) {
-        requireObjectTypeInterfaceMapping(id);
+    public void rejectObjectTypeInterfaceMapping(String id, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        requireObjectTypeInterfaceMapping(id, projectId);
         objectTypeInterfaceMappingMapper.deleteById(id);
     }
 
     @Transactional
-    public void approveInterface(String id) {
-        OntologyInterface ontologyInterface = requireInterface(id);
+    public void approveInterface(String id, String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        OntologyInterface ontologyInterface = requireInterface(id, projectId);
         ontologyInterface.setStatus("active");
         interfaceMapper.updateById(ontologyInterface);
     }
 
     @Transactional
-    public void rejectInterface(String id) {
-        deleteInterface(id);
+    public void rejectInterface(String id, String projectId) {
+        deleteInterface(id, projectId);
     }
 
-    public List<OntologyInterface> listPendingInterfaces() {
+    public List<OntologyInterface> listPendingInterfaces(String projectId) {
+        projectId = ProjectScope.normalize(projectId);
         return enrichInterfaces(
                 interfaceMapper.selectList(new LambdaQueryWrapper<OntologyInterface>()
+                        .eq(OntologyInterface::getProjectId, projectId)
                         .eq(OntologyInterface::getStatus, "pending")
                         .orderByDesc(OntologyInterface::getCreatedAt)),
                 false
         );
     }
 
-    public List<ObjectTypeInterfaceMapping> listPendingObjectTypeInterfaceMappings() {
-        return enrichObjectTypeInterfaceMappings(objectTypeInterfaceMappingMapper.selectPendingOrdered());
+    public List<ObjectTypeInterfaceMapping> listPendingObjectTypeInterfaceMappings(String projectId) {
+        projectId = ProjectScope.normalize(projectId);
+        return enrichObjectTypeInterfaceMappings(objectTypeInterfaceMappingMapper.selectPendingOrdered(projectId));
     }
 
     private List<OntologyInterface> enrichInterfaces(List<OntologyInterface> interfaces, boolean includeChildren) {
@@ -320,20 +348,21 @@ public class InterfaceService {
     }
 
     private void hydrateInterface(OntologyInterface ontologyInterface, boolean includeChildren) {
-        InterfaceExtends parentRelation = interfaceExtendsMapper.selectByChildInterfaceId(ontologyInterface.getId());
+        String projectId = ontologyInterface.getProjectId();
+        InterfaceExtends parentRelation = interfaceExtendsMapper.selectByChildInterfaceId(ontologyInterface.getId(), projectId);
         if (parentRelation != null) {
             ontologyInterface.setParentInterfaceId(parentRelation.getParentInterfaceId());
             OntologyInterface parent = interfaceMapper.selectById(parentRelation.getParentInterfaceId());
             ontologyInterface.setParentInterfaceName(parent != null ? parent.getName() : null);
         }
-        ontologyInterface.setProperties(interfacePropertyMapper.selectByInterfaceId(ontologyInterface.getId()));
-        ontologyInterface.setLinkTypeConstraints(enrichLinkTypeConstraints(interfaceLinkConstraintMapper.selectByInterfaceId(ontologyInterface.getId())));
+        ontologyInterface.setProperties(interfacePropertyMapper.selectByInterfaceId(ontologyInterface.getId(), projectId));
+        ontologyInterface.setLinkTypeConstraints(enrichLinkTypeConstraints(interfaceLinkConstraintMapper.selectByInterfaceId(ontologyInterface.getId(), projectId)));
         ontologyInterface.setImplementedObjectTypes(
-                enrichObjectTypeInterfaceMappings(objectTypeInterfaceMappingMapper.selectByInterfaceId(ontologyInterface.getId()))
+                enrichObjectTypeInterfaceMappings(objectTypeInterfaceMappingMapper.selectByInterfaceId(ontologyInterface.getId(), projectId))
         );
         if (includeChildren) {
             List<OntologyInterface> children = new ArrayList<>();
-            for (InterfaceExtends childRelation : interfaceExtendsMapper.selectByParentInterfaceId(ontologyInterface.getId())) {
+            for (InterfaceExtends childRelation : interfaceExtendsMapper.selectByParentInterfaceId(ontologyInterface.getId(), projectId)) {
                 OntologyInterface child = interfaceMapper.selectById(childRelation.getChildInterfaceId());
                 if (child != null) {
                     child.setParentInterfaceId(ontologyInterface.getId());
@@ -345,11 +374,11 @@ public class InterfaceService {
         }
     }
 
-    private List<InterfaceProperty> buildEffectiveProperties(String interfaceId) {
+    private List<InterfaceProperty> buildEffectiveProperties(String interfaceId, String projectId) {
         LinkedHashMap<String, InterfaceProperty> properties = new LinkedHashMap<>();
-        for (String ancestorId : collectLineage(interfaceId)) {
+        for (String ancestorId : collectLineage(interfaceId, projectId)) {
             OntologyInterface source = interfaceMapper.selectById(ancestorId);
-            for (InterfaceProperty property : interfacePropertyMapper.selectByInterfaceId(ancestorId)) {
+            for (InterfaceProperty property : interfacePropertyMapper.selectByInterfaceId(ancestorId, projectId)) {
                 InterfaceProperty copy = copyProperty(property);
                 copy.setInherited(!Objects.equals(ancestorId, interfaceId));
                 copy.setSourceInterfaceId(ancestorId);
@@ -360,11 +389,11 @@ public class InterfaceService {
         return new ArrayList<>(properties.values());
     }
 
-    private List<InterfaceLinkConstraint> buildEffectiveLinkTypeConstraints(String interfaceId) {
+    private List<InterfaceLinkConstraint> buildEffectiveLinkTypeConstraints(String interfaceId, String projectId) {
         LinkedHashMap<String, InterfaceLinkConstraint> constraints = new LinkedHashMap<>();
-        for (String ancestorId : collectLineage(interfaceId)) {
+        for (String ancestorId : collectLineage(interfaceId, projectId)) {
             OntologyInterface source = interfaceMapper.selectById(ancestorId);
-            for (InterfaceLinkConstraint constraint : interfaceLinkConstraintMapper.selectByInterfaceId(ancestorId)) {
+            for (InterfaceLinkConstraint constraint : interfaceLinkConstraintMapper.selectByInterfaceId(ancestorId, projectId)) {
                 InterfaceLinkConstraint copy = copyLinkTypeConstraint(constraint);
                 copy.setInherited(!Objects.equals(ancestorId, interfaceId));
                 copy.setSourceInterfaceId(ancestorId);
@@ -403,20 +432,20 @@ public class InterfaceService {
     }
 
     private ObjectTypeInterfaceMapping enrichObjectTypeInterfaceMapping(ObjectTypeInterfaceMapping mapping) {
-        OntologyInterface ontologyInterface = requireInterface(mapping.getInterfaceId());
-        ObjectType objectType = requireObjectType(mapping.getObjectTypeId());
+        OntologyInterface ontologyInterface = requireInterface(mapping.getInterfaceId(), mapping.getProjectId());
+        ObjectType objectType = requireObjectType(mapping.getObjectTypeId(), mapping.getProjectId());
         mapping.setInterfaceName(ontologyInterface.getName());
         mapping.setInterfaceDescription(ontologyInterface.getDescription());
         mapping.setObjectTypeName(objectType.getName());
-        List<InterfaceProperty> effectiveProperties = buildEffectiveProperties(mapping.getInterfaceId());
+        List<InterfaceProperty> effectiveProperties = buildEffectiveProperties(mapping.getInterfaceId(), mapping.getProjectId());
         mapping.setInterfaceProperties(effectiveProperties);
-        List<InterfacePropertyMapping> propertyMappings = interfacePropertyMappingMapper.selectByObjectTypeInterfaceMappingId(mapping.getId());
+        List<InterfacePropertyMapping> propertyMappings = interfacePropertyMappingMapper.selectByObjectTypeInterfaceMappingId(mapping.getId(), mapping.getProjectId());
         Map<String, InterfaceProperty> interfacePropertyIndex = new HashMap<>();
         for (InterfaceProperty property : effectiveProperties) {
             interfacePropertyIndex.put(property.getId(), property);
         }
         Map<String, Property> objectPropertyIndex = new HashMap<>();
-        for (Property property : propertyMapper.selectByObjectTypeId(mapping.getObjectTypeId())) {
+        for (Property property : propertyMapper.selectByObjectTypeId(mapping.getObjectTypeId(), mapping.getProjectId())) {
             objectPropertyIndex.put(property.getId(), property);
         }
         for (InterfacePropertyMapping propertyMapping : propertyMappings) {
@@ -435,7 +464,7 @@ public class InterfaceService {
         return mapping;
     }
 
-    private void validateInterfaceForCreate(OntologyInterface request) {
+    private void validateInterfaceForCreate(OntologyInterface request, String projectId) {
         if (request == null || isBlank(request.getId())) {
             throw new IllegalArgumentException("Interface ID 不能为空");
         }
@@ -479,7 +508,7 @@ public class InterfaceService {
         }
 
         Map<String, Property> objectPropertyIndex = new LinkedHashMap<>();
-        for (Property property : propertyMapper.selectByObjectTypeId(objectType.getId())) {
+        for (Property property : propertyMapper.selectByObjectTypeId(objectType.getId(), objectType.getProjectId())) {
             objectPropertyIndex.put(property.getId(), property);
         }
 
@@ -545,75 +574,75 @@ public class InterfaceService {
         }
     }
 
-    private void ensureNoCycle(String childInterfaceId, String parentInterfaceId) {
+    private void ensureNoCycle(String childInterfaceId, String parentInterfaceId, String projectId) {
         String cursor = parentInterfaceId;
         while (!isBlank(cursor)) {
             if (Objects.equals(cursor, childInterfaceId)) {
                 throw new IllegalArgumentException("无法建立继承关系：存在循环依赖");
             }
-            InterfaceExtends relation = interfaceExtendsMapper.selectByChildInterfaceId(cursor);
+            InterfaceExtends relation = interfaceExtendsMapper.selectByChildInterfaceId(cursor, projectId);
             cursor = relation != null ? relation.getParentInterfaceId() : null;
         }
     }
 
-    private List<String> collectLineage(String interfaceId) {
+    private List<String> collectLineage(String interfaceId, String projectId) {
         LinkedHashSet<String> lineage = new LinkedHashSet<>();
-        collectAncestors(interfaceId, lineage);
+        collectAncestors(interfaceId, lineage, projectId);
         lineage.add(interfaceId);
         return new ArrayList<>(lineage);
     }
 
-    private void collectAncestors(String interfaceId, Set<String> lineage) {
-        InterfaceExtends relation = interfaceExtendsMapper.selectByChildInterfaceId(interfaceId);
+    private void collectAncestors(String interfaceId, Set<String> lineage, String projectId) {
+        InterfaceExtends relation = interfaceExtendsMapper.selectByChildInterfaceId(interfaceId, projectId);
         if (relation == null || isBlank(relation.getParentInterfaceId())) {
             return;
         }
-        collectAncestors(relation.getParentInterfaceId(), lineage);
+        collectAncestors(relation.getParentInterfaceId(), lineage, projectId);
         lineage.add(relation.getParentInterfaceId());
     }
 
-    private OntologyInterface requireInterface(String id) {
+    private OntologyInterface requireInterface(String id, String projectId) {
         OntologyInterface ontologyInterface = interfaceMapper.selectById(id);
-        if (ontologyInterface == null) {
+        if (ontologyInterface == null || !Objects.equals(projectId, ontologyInterface.getProjectId())) {
             throw new IllegalArgumentException("Interface 不存在: " + id);
         }
         return ontologyInterface;
     }
 
-    private ObjectType requireObjectType(String id) {
+    private ObjectType requireObjectType(String id, String projectId) {
         ObjectType objectType = objectTypeMapper.selectById(id);
-        if (objectType == null) {
+        if (objectType == null || !Objects.equals(projectId, objectType.getProjectId())) {
             throw new IllegalArgumentException("Object Type 不存在: " + id);
         }
         return objectType;
     }
 
-    private InterfaceProperty requireProperty(String id) {
+    private InterfaceProperty requireProperty(String id, String projectId) {
         InterfaceProperty property = interfacePropertyMapper.selectById(id);
-        if (property == null) {
+        if (property == null || !Objects.equals(projectId, property.getProjectId())) {
             throw new IllegalArgumentException("Interface 属性不存在: " + id);
         }
         return property;
     }
 
-    private InterfaceLinkConstraint requireLinkTypeConstraint(String id) {
+    private InterfaceLinkConstraint requireLinkTypeConstraint(String id, String projectId) {
         InterfaceLinkConstraint constraint = interfaceLinkConstraintMapper.selectById(id);
-        if (constraint == null) {
+        if (constraint == null || !Objects.equals(projectId, constraint.getProjectId())) {
             throw new IllegalArgumentException("Link Type Constraint 不存在: " + id);
         }
         return constraint;
     }
 
-    private ObjectTypeInterfaceMapping requireObjectTypeInterfaceMapping(String id) {
+    private ObjectTypeInterfaceMapping requireObjectTypeInterfaceMapping(String id, String projectId) {
         ObjectTypeInterfaceMapping mapping = objectTypeInterfaceMappingMapper.selectById(id);
-        if (mapping == null) {
+        if (mapping == null || !Objects.equals(projectId, mapping.getProjectId())) {
             throw new IllegalArgumentException("Object Type Interface 实现关系不存在: " + id);
         }
         return mapping;
     }
 
-    private void replacePropertyMappings(String mappingId, List<InterfacePropertyMapping> propertyMappings) {
-        List<InterfacePropertyMapping> existingMappings = interfacePropertyMappingMapper.selectByObjectTypeInterfaceMappingId(mappingId);
+    private void replacePropertyMappings(String mappingId, List<InterfacePropertyMapping> propertyMappings, String projectId) {
+        List<InterfacePropertyMapping> existingMappings = interfacePropertyMappingMapper.selectByObjectTypeInterfaceMappingId(mappingId, projectId);
         for (InterfacePropertyMapping existingMapping : existingMappings) {
             interfacePropertyMappingMapper.deleteById(existingMapping.getId());
         }
@@ -628,6 +657,7 @@ public class InterfaceService {
             copy.setObjectTypeInterfaceMappingId(mappingId);
             copy.setInterfacePropertyId(propertyMapping.getInterfacePropertyId());
             copy.setPropertyId(propertyMapping.getPropertyId());
+            copy.setProjectId(projectId);
             interfacePropertyMappingMapper.insert(copy);
         }
     }
@@ -655,6 +685,7 @@ public class InterfaceService {
         target.setDescription(source.getDescription());
         target.setRequired(source.getRequired());
         target.setSortOrder(source.getSortOrder());
+        target.setProjectId(source.getProjectId());
         return target;
     }
 
@@ -669,6 +700,7 @@ public class InterfaceService {
         target.setCardinality(source.getCardinality());
         target.setRequired(source.getRequired());
         target.setStatus(source.getStatus());
+        target.setProjectId(source.getProjectId());
         target.setCreatedAt(source.getCreatedAt());
         target.setUpdatedAt(source.getUpdatedAt());
         return target;

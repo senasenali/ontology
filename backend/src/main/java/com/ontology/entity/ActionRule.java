@@ -27,6 +27,8 @@ public class ActionRule {
     private String functionTypeId;
     
     private Integer sortOrder;
+
+    private String projectId;
     
     private LocalDateTime createdAt;
     

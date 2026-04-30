@@ -19,4 +19,6 @@ public class ActionRuleParam {
     private String paramValue;
     
     private Integer sortOrder;
+
+    private String projectId;
 }

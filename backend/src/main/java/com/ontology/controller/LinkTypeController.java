@@ -23,19 +23,21 @@ public class LinkTypeController {
 
     @PostMapping
     @Transactional
-    public Map<String, Object> create(@RequestBody LinkType linkType) {
+    public Map<String, Object> create(@RequestBody LinkType linkType, @RequestParam(required = false) String projectId) {
+        linkType.setProjectId(com.ontology.project.ProjectScope.normalize(projectId));
         linkType.setStatus("pending"); // 新建链接类型默认待审核
         linkTypeMapper.insert(linkType);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(linkType.getProjectId()));
         return result;
     }
 
     @PutMapping("/{id}")
     @Transactional
-    public Map<String, Object> update(@PathVariable String id, @RequestBody LinkType linkType) {
+    public Map<String, Object> update(@PathVariable String id, @RequestBody LinkType linkType, @RequestParam(required = false) String projectId) {
         linkType.setId(id);
+        linkType.setProjectId(com.ontology.project.ProjectScope.normalize(projectId));
         linkTypeMapper.updateById(linkType);
         LinkType updated = linkTypeMapper.selectById(id);
         if (updated != null && "active".equalsIgnoreCase(updated.getStatus())) {
@@ -43,18 +45,19 @@ public class LinkTypeController {
         }
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(linkType.getProjectId()));
         return result;
     }
 
     @DeleteMapping("/{id}")
     @Transactional
-    public Map<String, Object> delete(@PathVariable String id) {
+    public Map<String, Object> delete(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         ruleTemplateService.deleteLinkTypeRuleArtifacts(id);
         linkTypeMapper.deleteById(id);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(projectId));
         return result;
     }
 }

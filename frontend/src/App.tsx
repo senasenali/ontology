@@ -100,10 +100,14 @@ function AppContent() {
   const [ontology, setOntology] = useState<OntologyData>({ objectTypes: [], linkTypes: [], actionTypes: [], interfaces: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentProjectId, setCurrentProjectId] = useState(() => api.getCurrentProjectId());
 
   const activeTab = getTabFromPath(location.pathname);
 
-  useEffect(() => {
+  const loadOntology = (projectId: string) => {
+    api.setCurrentProjectId(projectId);
+    setLoading(true);
+    setError(null);
     api.getOntology()
       .then(data => setOntology({
         objectTypes: data.objectTypes || [],
@@ -113,7 +117,11 @@ function AppContent() {
       }))
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => {
+    loadOntology(currentProjectId);
+  }, [currentProjectId]);
 
   const handleNavigate = (tab: string) => {
     const path = ROUTES[tab as keyof typeof ROUTES];
@@ -122,8 +130,12 @@ function AppContent() {
     }
   };
 
+  const handleProjectChange = (projectId: string) => {
+    setCurrentProjectId(projectId);
+  };
+
   return (
-    <Layout activeTab={activeTab} onNavigate={handleNavigate}>
+    <Layout activeTab={activeTab} onNavigate={handleNavigate} currentProjectId={currentProjectId} onProjectChange={handleProjectChange}>
       <Routes>
         <Route path="/" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
@@ -137,42 +149,42 @@ function AppContent() {
         } />
         <Route path="/objects" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
-            <ObjectTypes data={ontology} onUpdate={setOntology} />
+            <ObjectTypes key={currentProjectId} data={ontology} onUpdate={setOntology} />
           </PageWrapper>
         } />
         <Route path="/interfaces" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
-            <Interfaces data={ontology} onUpdate={setOntology} />
+            <Interfaces key={currentProjectId} data={ontology} onUpdate={setOntology} />
           </PageWrapper>
         } />
         <Route path="/explorer" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
-            <ObjectExplorer data={ontology} />
+            <ObjectExplorer key={currentProjectId} data={ontology} />
           </PageWrapper>
         } />
         <Route path="/links" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
-            <LinkTypes data={ontology} onUpdate={setOntology} />
+            <LinkTypes key={currentProjectId} data={ontology} onUpdate={setOntology} />
           </PageWrapper>
         } />
         <Route path="/actions" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
-            <ActionTypes />
+            <ActionTypes key={currentProjectId} />
           </PageWrapper>
         } />
         <Route path="/rules" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
-            <OntologyRules />
+            <OntologyRules key={currentProjectId} />
           </PageWrapper>
         } />
         <Route path="/functions" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
-            <FunctionTypes />
+            <FunctionTypes key={currentProjectId} />
           </PageWrapper>
         } />
         <Route path="/agents" element={
           <PageWrapper ontology={ontology} setOntology={setOntology} loading={loading} error={error}>
-            <AgentStudio />
+            <AgentStudio key={currentProjectId} />
           </PageWrapper>
         } />
         <Route path="/settings" element={

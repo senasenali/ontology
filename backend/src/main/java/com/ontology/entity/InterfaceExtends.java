@@ -15,4 +15,6 @@ public class InterfaceExtends {
     private String parentInterfaceId;
 
     private String childInterfaceId;
+
+    private String projectId;
 }

@@ -25,4 +25,6 @@ public class OntologyRuleParam {
     private String description;
     
     private Integer sortOrder;
+
+    private String projectId;
 }

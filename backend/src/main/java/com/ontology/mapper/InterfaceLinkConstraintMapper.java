@@ -11,6 +11,6 @@ import java.util.List;
 @Mapper
 public interface InterfaceLinkConstraintMapper extends BaseMapper<InterfaceLinkConstraint> {
 
-    @Select("SELECT * FROM interface_link_constraints WHERE interface_id = #{interfaceId} ORDER BY created_at, name")
-    List<InterfaceLinkConstraint> selectByInterfaceId(@Param("interfaceId") String interfaceId);
+    @Select("SELECT * FROM interface_link_constraints WHERE interface_id = #{interfaceId} AND project_id = #{projectId} ORDER BY created_at, name")
+    List<InterfaceLinkConstraint> selectByInterfaceId(@Param("interfaceId") String interfaceId, @Param("projectId") String projectId);
 }

@@ -11,6 +11,7 @@ function buildLinkKey(a: string, b: string, linkTypeId: string, isSameType: bool
 // 获取对象类型的实例数据
 router.get('/:objectTypeId/instances', async (req, res) => {
   const { objectTypeId } = req.params;
+  const projectId = String(req.query.projectId || 'project_public');
   
   try {
     const connection = await pool.getConnection();
@@ -21,8 +22,8 @@ router.get('/:objectTypeId/instances', async (req, res) => {
               p.id as prop_id, p.name as prop_name, p.base_column, p.is_primary_key, p.type
        FROM object_types ot
        LEFT JOIN properties p ON ot.id = p.object_type_id
-       WHERE ot.id = ?`,
-      [objectTypeId]
+       WHERE ot.id = ? AND ot.project_id = ? AND (p.project_id = ? OR p.project_id IS NULL)`,
+      [objectTypeId, projectId, projectId]
     );
     
     if (objectTypeRows.length === 0) {
@@ -99,6 +100,7 @@ router.get('/:objectTypeId/instances', async (req, res) => {
 router.get('/:objectTypeId/instances/:instanceId/graph', async (req, res) => {
   const { objectTypeId, instanceId } = req.params;
   const maxDepth = parseInt(req.query.depth as string) || 3;
+  const projectId = String(req.query.projectId || 'project_public');
   
   try {
     const connection = await pool.getConnection();
@@ -109,8 +111,8 @@ router.get('/:objectTypeId/instances/:instanceId/graph', async (req, res) => {
               p.id as prop_id, p.name as prop_name, p.base_column, p.is_primary_key, p.type
        FROM object_types ot
        LEFT JOIN properties p ON ot.id = p.object_type_id
-       WHERE ot.id = ?`,
-      [objectTypeId]
+       WHERE ot.id = ? AND ot.project_id = ? AND (p.project_id = ? OR p.project_id IS NULL)`,
+      [objectTypeId, projectId, projectId]
     );
     
     if (otRows.length === 0) {
@@ -160,8 +162,8 @@ router.get('/:objectTypeId/instances/:instanceId/graph', async (req, res) => {
                 p.id as prop_id, p.name as prop_name, p.base_column, p.is_primary_key
          FROM object_types ot
          LEFT JOIN properties p ON ot.id = p.object_type_id
-         WHERE ot.id = ?`,
-        [currentObjectTypeId]
+         WHERE ot.id = ? AND ot.project_id = ? AND (p.project_id = ? OR p.project_id IS NULL)`,
+        [currentObjectTypeId, projectId, projectId]
       );
       
       if (currentOtRows.length === 0) return;
@@ -209,10 +211,10 @@ router.get('/:objectTypeId/instances/:instanceId/graph', async (req, res) => {
                 sot.name as source_name, sot.backing_dataset as source_table,
                 tot.name as target_name, tot.backing_dataset as target_table
          FROM link_types lt
-         JOIN object_types sot ON lt.source_object_id = sot.id
-         JOIN object_types tot ON lt.target_object_id = tot.id
-         WHERE lt.source_object_id = ? OR lt.target_object_id = ?`,
-        [currentObjectTypeId, currentObjectTypeId]
+         JOIN object_types sot ON lt.source_object_id = sot.id AND sot.project_id = lt.project_id
+         JOIN object_types tot ON lt.target_object_id = tot.id AND tot.project_id = lt.project_id
+         WHERE (lt.source_object_id = ? OR lt.target_object_id = ?) AND lt.project_id = ?`,
+        [currentObjectTypeId, currentObjectTypeId, projectId]
       );
       
       for (const linkType of linkTypeRows) {

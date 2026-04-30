@@ -11,12 +11,12 @@ import java.util.List;
 @Mapper
 public interface FunctionTypeMapper extends BaseMapper<FunctionType> {
     
-    @Select("SELECT * FROM function_types WHERE status = 'ACTIVE' ORDER BY created_at DESC")
-    List<FunctionType> selectAllActive();
+    @Select("SELECT * FROM function_types WHERE status = 'ACTIVE' AND project_id = #{projectId} ORDER BY created_at DESC")
+    List<FunctionType> selectAllActive(@Param("projectId") String projectId);
     
-    @Select("SELECT * FROM function_types WHERE category = #{category} AND status = 'ACTIVE' ORDER BY created_at DESC")
-    List<FunctionType> selectByCategory(@Param("category") String category);
+    @Select("SELECT * FROM function_types WHERE category = #{category} AND status = 'ACTIVE' AND project_id = #{projectId} ORDER BY created_at DESC")
+    List<FunctionType> selectByCategory(@Param("projectId") String projectId, @Param("category") String category);
     
-    @Select("SELECT * FROM function_types WHERE code = #{code} AND status = 'ACTIVE' LIMIT 1")
-    FunctionType selectByCode(@Param("code") String code);
+    @Select("SELECT * FROM function_types WHERE code = #{code} AND status = 'ACTIVE' AND project_id = #{projectId} LIMIT 1")
+    FunctionType selectByCode(@Param("projectId") String projectId, @Param("code") String code);
 }

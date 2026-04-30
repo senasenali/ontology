@@ -12,9 +12,9 @@ import java.util.List;
 @Mapper
 public interface AgentAnalysisMapper extends BaseMapper<AgentAnalysis> {
     
-    @Select("SELECT * FROM agent_analyses WHERE agent_id = #{agentId} ORDER BY created_at DESC LIMIT 20")
-    List<AgentAnalysis> selectByAgentId(@Param("agentId") String agentId);
+    @Select("SELECT * FROM agent_analyses WHERE agent_id = #{agentId} AND project_id = #{projectId} ORDER BY created_at DESC LIMIT 20")
+    List<AgentAnalysis> selectByAgentId(@Param("agentId") String agentId, @Param("projectId") String projectId);
 
-    @Delete("DELETE FROM agent_analyses WHERE agent_id = #{agentId}")
-    void deleteByAgentId(@Param("agentId") String agentId);
+    @Delete("DELETE FROM agent_analyses WHERE agent_id = #{agentId} AND project_id = #{projectId}")
+    void deleteByAgentId(@Param("agentId") String agentId, @Param("projectId") String projectId);
 }

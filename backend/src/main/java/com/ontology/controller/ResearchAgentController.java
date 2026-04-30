@@ -6,6 +6,7 @@ import com.ontology.entity.AgentAnalysis;
 import com.ontology.mapper.AgentMapper;
 import com.ontology.mapper.AgentEventMapper;
 import com.ontology.mapper.AgentAnalysisMapper;
+import com.ontology.project.ProjectScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,27 +27,33 @@ public class ResearchAgentController {
     private final AgentMapper agentMapper;
     private final AgentEventMapper agentEventMapper;
     private final AgentAnalysisMapper agentAnalysisMapper;
+
+    private Agent requireAgent(String id, String projectId) {
+        Agent agent = agentMapper.selectById(id);
+        if (agent == null || !projectId.equals(agent.getProjectId())) {
+            throw new RuntimeException("Agent not found");
+        }
+        return agent;
+    }
     
     @GetMapping
-    public Map<String, Object> list() {
-        List<Agent> agents = agentMapper.selectAllOrdered();
+    public Map<String, Object> list(@RequestParam(required = false) String projectId) {
+        List<Agent> agents = agentMapper.selectAllOrdered(ProjectScope.normalize(projectId));
         return Map.of("agents", agents);
     }
     
     @GetMapping("/{id}")
-    public Map<String, Object> getById(@PathVariable String id) {
-        Agent agent = agentMapper.selectById(id);
-        if (agent == null) {
-            throw new RuntimeException("Agent not found");
-        }
+    public Map<String, Object> getById(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        Agent agent = requireAgent(id, ProjectScope.normalize(projectId));
         return Map.of("agent", agent);
     }
     
     @PostMapping
-    public Map<String, Object> create(@RequestBody Map<String, Object> data) {
+    public Map<String, Object> create(@RequestBody Map<String, Object> data, @RequestParam(required = false) String projectId) {
         String name = (String) data.get("name");
         String targetCompany = (String) data.get("targetCompany");
         String targetIndustry = (String) data.get("targetIndustry");
+        String scopedProjectId = ProjectScope.normalize(projectId);
         
         if (name == null || targetCompany == null || targetIndustry == null) {
             throw new RuntimeException("name, targetCompany, targetIndustry are required");
@@ -61,6 +68,7 @@ public class ResearchAgentController {
         agent.setAnalysisFocus((String) data.getOrDefault("analysisFocus", ""));
         agent.setScheduleMinutes((Integer) data.getOrDefault("scheduleMinutes", 0));
         agent.setIsActive(0);
+        agent.setProjectId(scopedProjectId);
         agent.setCreatedAt(LocalDateTime.now());
         agent.setUpdatedAt(LocalDateTime.now());
         
@@ -73,11 +81,8 @@ public class ResearchAgentController {
     }
     
     @PutMapping("/{id}")
-    public Map<String, Object> update(@PathVariable String id, @RequestBody Map<String, Object> data) {
-        Agent agent = agentMapper.selectById(id);
-        if (agent == null) {
-            throw new RuntimeException("Agent not found");
-        }
+    public Map<String, Object> update(@PathVariable String id, @RequestBody Map<String, Object> data, @RequestParam(required = false) String projectId) {
+        Agent agent = requireAgent(id, ProjectScope.normalize(projectId));
         
         if (data.containsKey("is_active")) {
             Object isActive = data.get("is_active");
@@ -102,14 +107,17 @@ public class ResearchAgentController {
     }
     
     @DeleteMapping("/{id}")
-    public Map<String, Object> delete(@PathVariable String id) {
+    public Map<String, Object> delete(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        requireAgent(id, ProjectScope.normalize(projectId));
         agentMapper.deleteById(id);
         return Map.of("success", true);
     }
     
     @GetMapping("/{id}/events")
-    public Map<String, Object> getEvents(@PathVariable String id) {
-        List<AgentEvent> events = agentEventMapper.selectByAgentId(id);
+    public Map<String, Object> getEvents(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        String scopedProjectId = ProjectScope.normalize(projectId);
+        requireAgent(id, scopedProjectId);
+        List<AgentEvent> events = agentEventMapper.selectByAgentId(id, scopedProjectId);
         // Parse JSON fields
         for (AgentEvent event : events) {
             if (event.getRelatedEntities() == null) {
@@ -120,7 +128,9 @@ public class ResearchAgentController {
     }
     
     @PostMapping("/{id}/events")
-    public Map<String, Object> createEvent(@PathVariable String id, @RequestBody Map<String, Object> data) {
+    public Map<String, Object> createEvent(@PathVariable String id, @RequestBody Map<String, Object> data, @RequestParam(required = false) String projectId) {
+        String scopedProjectId = ProjectScope.normalize(projectId);
+        requireAgent(id, scopedProjectId);
         AgentEvent event = new AgentEvent();
         event.setId((String) data.get("id"));
         event.setAgentId(id);
@@ -131,6 +141,7 @@ public class ResearchAgentController {
         event.setEventDate((String) data.get("event_date"));
         event.setImpactLevel((String) data.get("impact_level"));
         event.setRelatedEntities((String) data.get("related_entities"));
+        event.setProjectId(scopedProjectId);
         event.setCreatedAt(LocalDateTime.now());
         
         agentEventMapper.insert(event);
@@ -138,15 +149,19 @@ public class ResearchAgentController {
     }
     
     @GetMapping("/{id}/analyses")
-    public Map<String, Object> getAnalyses(@PathVariable String id) {
-        List<AgentAnalysis> analyses = agentAnalysisMapper.selectByAgentId(id);
+    public Map<String, Object> getAnalyses(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        String scopedProjectId = ProjectScope.normalize(projectId);
+        requireAgent(id, scopedProjectId);
+        List<AgentAnalysis> analyses = agentAnalysisMapper.selectByAgentId(id, scopedProjectId);
         return Map.of("analyses", analyses);
     }
     
     @PostMapping("/{id}/analyses")
-    public Map<String, Object> createAnalysis(@PathVariable String id, @RequestBody Map<String, Object> data) {
+    public Map<String, Object> createAnalysis(@PathVariable String id, @RequestBody Map<String, Object> data, @RequestParam(required = false) String projectId) {
+        String scopedProjectId = ProjectScope.normalize(projectId);
+        requireAgent(id, scopedProjectId);
         if (LITHIUM_DEMO_AGENT_ID.equals(id)) {
-            agentAnalysisMapper.deleteByAgentId(id);
+            agentAnalysisMapper.deleteByAgentId(id, scopedProjectId);
         }
 
         AgentAnalysis analysis = new AgentAnalysis();
@@ -158,6 +173,7 @@ public class ResearchAgentController {
         analysis.setKeyFindings((String) data.get("key_findings"));
         analysis.setImpactChain((String) data.get("impact_chain"));
         analysis.setRecommendation((String) data.get("recommendation"));
+        analysis.setProjectId(scopedProjectId);
         analysis.setCreatedAt(LocalDateTime.now());
         
         agentAnalysisMapper.insert(analysis);
@@ -165,9 +181,11 @@ public class ResearchAgentController {
     }
 
     @DeleteMapping("/{id}/analyses/{analysisId}")
-    public Map<String, Object> deleteAnalysis(@PathVariable String id, @PathVariable String analysisId) {
+    public Map<String, Object> deleteAnalysis(@PathVariable String id, @PathVariable String analysisId, @RequestParam(required = false) String projectId) {
+        String scopedProjectId = ProjectScope.normalize(projectId);
+        requireAgent(id, scopedProjectId);
         AgentAnalysis analysis = agentAnalysisMapper.selectById(analysisId);
-        if (analysis == null || !id.equals(analysis.getAgentId())) {
+        if (analysis == null || !id.equals(analysis.getAgentId()) || !scopedProjectId.equals(analysis.getProjectId())) {
             throw new RuntimeException("Analysis not found");
         }
 

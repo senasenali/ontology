@@ -31,6 +31,8 @@ public class InterfaceLinkConstraint {
 
     private String status;
 
+    private String projectId;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

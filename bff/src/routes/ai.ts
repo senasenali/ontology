@@ -23,6 +23,11 @@ const sessions = new Map<string, {
   createdAt: number;
 }>();
 
+function withProjectId(path: string, projectId: string) {
+  const query = `projectId=${encodeURIComponent(projectId || 'project_public')}`;
+  return `${JAVA_BACKEND}${path}${path.includes('?') ? '&' : '?'}${query}`;
+}
+
 function checkAI(): boolean {
   return !!DEEPSEEK_API_KEY;
 }
@@ -374,9 +379,9 @@ router.post('/conversation/:sessionId/apply', async (req, res) => {
 });
 
 // Get all conversations from Java backend
-router.get('/conversations', async (_req, res) => {
+router.get('/conversations', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/ai/conversations`);
+    const response = await fetch(withProjectId('/api/ai/conversations', String(req.query.projectId || 'project_public')));
     const data = await response.json();
     res.json(data);
   } catch (err: any) {
@@ -387,7 +392,7 @@ router.get('/conversations', async (_req, res) => {
 // Get conversation by ID
 router.get('/conversations/:id', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/ai/conversations/${req.params.id}`);
+    const response = await fetch(withProjectId(`/api/ai/conversations/${req.params.id}`, String(req.query.projectId || 'project_public')));
     const data = await response.json();
     res.status(response.status).json(data);
   } catch (err: any) {
@@ -398,7 +403,7 @@ router.get('/conversations/:id', async (req, res) => {
 // Create conversation
 router.post('/conversations', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/ai/conversations`, {
+    const response = await fetch(withProjectId('/api/ai/conversations', String(req.query.projectId || 'project_public')), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req.body),
@@ -413,7 +418,7 @@ router.post('/conversations', async (req, res) => {
 // Update conversation
 router.put('/conversations/:id', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/ai/conversations/${req.params.id}`, {
+    const response = await fetch(withProjectId(`/api/ai/conversations/${req.params.id}`, String(req.query.projectId || 'project_public')), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req.body),
@@ -428,7 +433,7 @@ router.put('/conversations/:id', async (req, res) => {
 // Delete conversation
 router.delete('/conversations/:id', async (req, res) => {
   try {
-    const response = await fetch(`${JAVA_BACKEND}/api/ai/conversations/${req.params.id}`, {
+    const response = await fetch(withProjectId(`/api/ai/conversations/${req.params.id}`, String(req.query.projectId || 'project_public')), {
       method: 'DELETE',
     });
     const data = await response.json();

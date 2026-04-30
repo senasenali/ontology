@@ -22,6 +22,8 @@ public class ObjectTypeInterfaceMapping {
 
     private String status;
 
+    private String projectId;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

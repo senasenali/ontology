@@ -33,12 +33,14 @@ public class OntologyRuleController {
     private final RuleTemplateService ruleTemplateService;
 
     @GetMapping
-    public Map<String, Object> list(@RequestParam(required = false) String category) {
+    public Map<String, Object> list(@RequestParam(required = false) String category,
+                                    @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         List<OntologyRule> rules;
         if (category != null && !category.isEmpty()) {
-            rules = ruleMapper.selectByCategory(category);
+            rules = ruleMapper.selectByCategory(projectId, category);
         } else {
-            rules = ruleMapper.selectAllOrdered();
+            rules = ruleMapper.selectAllOrdered(projectId);
         }
         
         // 加载每个规则的参数
@@ -46,20 +48,21 @@ public class OntologyRuleController {
             rule.setInputParams(paramMapper.selectInputParamsByRuleId(rule.getId()));
             rule.setOutputParams(paramMapper.selectOutputParamsByRuleId(rule.getId()));
         }
-        enrichRelatedEntities(rules);
+        enrichRelatedEntities(rules, projectId);
         
         return Map.of("rules", rules);
     }
 
     @GetMapping("/{id}")
-    public Map<String, Object> getById(@PathVariable String id) {
+    public Map<String, Object> getById(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         OntologyRule rule = ruleMapper.selectById(id);
-        if (rule == null) {
+        if (rule == null || !projectId.equals(rule.getProjectId())) {
             throw new RuntimeException("Rule not found");
         }
         rule.setInputParams(paramMapper.selectInputParamsByRuleId(id));
         rule.setOutputParams(paramMapper.selectOutputParamsByRuleId(id));
-        enrichRelatedEntities(List.of(rule));
+        enrichRelatedEntities(List.of(rule), projectId);
         return Map.of("rule", rule);
     }
 
@@ -70,7 +73,8 @@ public class OntologyRuleController {
     }
 
     @PostMapping
-    public Map<String, Object> create(@RequestBody Map<String, Object> request) {
+    public Map<String, Object> create(@RequestBody Map<String, Object> request, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         String id = "rule_" + UUID.randomUUID().toString().substring(0, 8);
         
         OntologyRule rule = new OntologyRule();
@@ -80,6 +84,7 @@ public class OntologyRuleController {
         rule.setInterfaceType((String) request.get("interfaceType"));
         rule.setRequestMethod((String) request.get("requestMethod"));
         rule.setInterfaceUrl((String) request.get("interfaceUrl"));
+        rule.setProjectId(projectId);
         rule.setCreatedAt(LocalDateTime.now());
         rule.setUpdatedAt(LocalDateTime.now());
         
@@ -99,6 +104,7 @@ public class OntologyRuleController {
                 param.setIsRequired(p.get("isRequired") != null && (Boolean) p.get("isRequired") ? 1 : 0);
                 param.setDescription((String) p.get("description"));
                 param.setSortOrder(i);
+                param.setProjectId(projectId);
                 paramMapper.insert(param);
             }
         }
@@ -117,6 +123,7 @@ public class OntologyRuleController {
                 param.setIsRequired(p.get("isRequired") != null && (Boolean) p.get("isRequired") ? 1 : 0);
                 param.setDescription((String) p.get("description"));
                 param.setSortOrder(i);
+                param.setProjectId(projectId);
                 paramMapper.insert(param);
             }
         }
@@ -128,9 +135,10 @@ public class OntologyRuleController {
     }
 
     @PutMapping("/{id}")
-    public Map<String, Object> update(@PathVariable String id, @RequestBody Map<String, Object> request) {
+    public Map<String, Object> update(@PathVariable String id, @RequestBody Map<String, Object> request, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         OntologyRule rule = ruleMapper.selectById(id);
-        if (rule == null) {
+        if (rule == null || !projectId.equals(rule.getProjectId())) {
             throw new RuntimeException("Rule not found");
         }
         
@@ -170,6 +178,7 @@ public class OntologyRuleController {
                 param.setIsRequired(p.get("isRequired") != null && (Boolean) p.get("isRequired") ? 1 : 0);
                 param.setDescription((String) p.get("description"));
                 param.setSortOrder(i);
+                param.setProjectId(projectId);
                 paramMapper.insert(param);
             }
         }
@@ -188,6 +197,7 @@ public class OntologyRuleController {
                 param.setIsRequired(p.get("isRequired") != null && (Boolean) p.get("isRequired") ? 1 : 0);
                 param.setDescription((String) p.get("description"));
                 param.setSortOrder(i);
+                param.setProjectId(projectId);
                 paramMapper.insert(param);
             }
         }
@@ -199,7 +209,12 @@ public class OntologyRuleController {
     }
 
     @DeleteMapping("/{id}")
-    public Map<String, Object> delete(@PathVariable String id) {
+    public Map<String, Object> delete(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
+        OntologyRule current = ruleMapper.selectById(id);
+        if (current == null || !projectId.equals(current.getProjectId())) {
+            throw new RuntimeException("Rule not found");
+        }
         // 先删除参数
         paramMapper.deleteByRuleId(id);
         // 再删除规则
@@ -207,10 +222,10 @@ public class OntologyRuleController {
         return Map.of("success", true);
     }
 
-    private void enrichRelatedEntities(List<OntologyRule> rules) {
-        Map<String, ObjectType> objectTypes = objectTypeMapper.selectAllOrdered().stream()
+    private void enrichRelatedEntities(List<OntologyRule> rules, String projectId) {
+        Map<String, ObjectType> objectTypes = objectTypeMapper.selectAllOrdered(projectId).stream()
                 .collect(Collectors.toMap(ObjectType::getId, Function.identity(), (a, b) -> a));
-        Map<String, LinkType> linkTypes = linkTypeMapper.selectAllOrdered().stream()
+        Map<String, LinkType> linkTypes = linkTypeMapper.selectAllOrdered(projectId).stream()
                 .collect(Collectors.toMap(LinkType::getId, Function.identity(), (a, b) -> a));
 
         for (OntologyRule rule : rules) {

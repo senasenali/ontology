@@ -2,8 +2,20 @@ import { OntologyData, IndustryCategory } from '@/src/store/ontologyStore';
 
 const API_BASE = '/api';
 
+let currentProjectId =
+  typeof window !== 'undefined'
+    ? window.localStorage.getItem('currentProjectId') || 'project_public'
+    : 'project_public';
+
+function withProjectId(url: string) {
+  const hasQuery = url.includes('?');
+  const hasProject = url.includes('projectId=');
+  if (hasProject) return url;
+  return `${url}${hasQuery ? '&' : '?'}projectId=${encodeURIComponent(currentProjectId)}`;
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${url}`, {
+  const response = await fetch(`${API_BASE}${withProjectId(url)}`, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
@@ -22,9 +34,32 @@ export interface ConversationResponse {
 }
 
 export const api = {
+  setCurrentProjectId: (projectId: string) => {
+    currentProjectId = projectId || 'project_public';
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('currentProjectId', currentProjectId);
+    }
+  },
+
+  getCurrentProjectId: () => currentProjectId,
+
   // ── Ontology ───────────────────────────────────────────────────────────────
   getOntology: () =>
     request<OntologyData>('/ontology'),
+
+  getProjects: () =>
+    request<{ success: boolean; projects: any[] }>('/projects'),
+
+  createProject: (name: string, description = '') =>
+    request<{ success: boolean; project: any; projects: any[] }>('/projects', {
+      method: 'POST',
+      body: JSON.stringify({ name, description }),
+    }),
+
+  deleteProject: (id: string) =>
+    request<{ success: boolean; projects: any[] }>(`/projects/${id}`, {
+      method: 'DELETE',
+    }),
 
   importOntology: (objectTypes: any[], linkTypes: any[]) =>
     request<{ success: boolean; data: OntologyData }>('/ontology/import', {

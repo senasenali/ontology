@@ -11,6 +11,10 @@ const MODEL = 'deepseek-chat';
 const CREATE_LINK_ACTION_IDS = ['act_create_company_company_link', 'act_create_company_strategic_link'];
 const DELETE_LINK_ACTION_IDS = ['act_delete_company_company_link'];
 
+function getProjectId(req: { query?: Record<string, any> }) {
+  return String(req.query?.projectId || 'project_public');
+}
+
 function checkAI(): boolean {
   return !!DEEPSEEK_API_KEY;
 }
@@ -41,7 +45,7 @@ async function callDeepSeek(messages: { role: string; content: string }[]) {
   return data.choices?.[0]?.message?.content || '';
 }
 
-async function fetchCandidateByNews(newsEventId: string) {
+async function fetchCandidateByNews(newsEventId: string, projectId: string) {
   const connection = await pool.getConnection();
   try {
     const [rows]: any = await connection.execute(
@@ -51,9 +55,10 @@ async function fetchCandidateByNews(newsEventId: string) {
        LEFT JOIN company_entity tn ON rc.target_instance_id = tn.company_id
        LEFT JOIN link_types lt ON rc.link_type_id = lt.id
        WHERE rc.news_event_id = ?
+         AND rc.project_id = ?
        ORDER BY rc.created_at DESC
        LIMIT 1`,
-      [newsEventId],
+      [newsEventId, projectId],
     );
     return rows[0] || null;
   } finally {
@@ -198,17 +203,19 @@ async function executeCompanyLinkFallback(method: 'POST' | 'DELETE', parameters:
   }
 }
 
-router.get('/events', async (_req, res) => {
+router.get('/events', async (req, res) => {
   try {
+    const projectId = getProjectId(req);
     const connection = await pool.getConnection();
     const [rows]: any = await connection.execute(
-      `SELECT * FROM news_events ORDER BY event_date DESC, created_at DESC LIMIT 20`,
+      `SELECT * FROM news_events WHERE project_id = ? ORDER BY event_date DESC, created_at DESC LIMIT 20`,
+      [projectId],
     );
     connection.release();
 
     const events = await Promise.all(
       rows.map(async (row: any) => {
-        const candidate = await fetchCandidateByNews(row.id);
+        const candidate = await fetchCandidateByNews(row.id, projectId);
         return {
           id: row.id,
           title: row.title,
@@ -241,7 +248,8 @@ router.post('/events/:id/analyze', async (req, res) => {
   }
 
   try {
-    const existingCandidate = await fetchCandidateByNews(req.params.id);
+    const projectId = getProjectId(req);
+    const existingCandidate = await fetchCandidateByNews(req.params.id, projectId);
     if (existingCandidate) {
       return res.json({
         success: true,
@@ -250,7 +258,7 @@ router.post('/events/:id/analyze', async (req, res) => {
     }
 
     const connection = await pool.getConnection();
-    const [eventRows]: any = await connection.execute(`SELECT * FROM news_events WHERE id = ? LIMIT 1`, [req.params.id]);
+    const [eventRows]: any = await connection.execute(`SELECT * FROM news_events WHERE id = ? AND project_id = ? LIMIT 1`, [req.params.id, projectId]);
     const [companyRows]: any = await connection.execute(`SELECT company_id, name, stock_code, market, industry FROM company_entity`);
     const [linkTypeRows]: any = await connection.execute(
       `SELECT id, name, source_object_id, target_object_id FROM link_types WHERE source_object_id = 'company_entity' AND target_object_id = 'company_entity'`,
@@ -334,8 +342,8 @@ ${linkTypes.map((item) => `- ${item.name} (${item.id})`).join('\n')}
     await connection.execute(
       `INSERT INTO relation_candidates (
         id, news_event_id, source_object_type_id, source_instance_id, target_object_type_id, target_instance_id,
-        link_type_id, relation_name, evidence, confidence, llm_source, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        link_type_id, relation_name, evidence, confidence, llm_source, status, project_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         candidateId,
         req.params.id,
@@ -349,6 +357,7 @@ ${linkTypes.map((item) => `- ${item.name} (${item.id})`).join('\n')}
         Number(parsed.confidence || 0.75),
         llmSource,
         'recognized',
+        projectId,
       ],
     );
     connection.release();
@@ -382,10 +391,11 @@ ${linkTypes.map((item) => `- ${item.name} (${item.id})`).join('\n')}
 
 router.post('/candidates/:id/create-link', async (req, res) => {
   try {
+    const projectId = getProjectId(req);
     const connection = await pool.getConnection();
     const [rows]: any = await connection.execute(
-      `SELECT * FROM relation_candidates WHERE id = ? LIMIT 1`,
-      [req.params.id],
+      `SELECT * FROM relation_candidates WHERE id = ? AND project_id = ? LIMIT 1`,
+      [req.params.id, projectId],
     );
 
     if (rows.length === 0) {
@@ -419,8 +429,8 @@ router.post('/candidates/:id/create-link', async (req, res) => {
 
     const updateConn = await pool.getConnection();
     await updateConn.execute(
-      `UPDATE relation_candidates SET status = 'created' WHERE id = ?`,
-      [req.params.id],
+      `UPDATE relation_candidates SET status = 'created' WHERE id = ? AND project_id = ?`,
+      [req.params.id, projectId],
     );
     updateConn.release();
 
@@ -432,10 +442,11 @@ router.post('/candidates/:id/create-link', async (req, res) => {
 
 router.post('/candidates/:id/delete-link', async (req, res) => {
   try {
+    const projectId = getProjectId(req);
     const connection = await pool.getConnection();
     const [rows]: any = await connection.execute(
-      `SELECT * FROM relation_candidates WHERE id = ? LIMIT 1`,
-      [req.params.id],
+      `SELECT * FROM relation_candidates WHERE id = ? AND project_id = ? LIMIT 1`,
+      [req.params.id, projectId],
     );
 
     if (rows.length === 0) {
@@ -468,8 +479,8 @@ router.post('/candidates/:id/delete-link', async (req, res) => {
 
     const updateConn = await pool.getConnection();
     await updateConn.execute(
-      `UPDATE relation_candidates SET status = 'recognized' WHERE id = ?`,
-      [req.params.id],
+      `UPDATE relation_candidates SET status = 'recognized' WHERE id = ? AND project_id = ?`,
+      [req.params.id, projectId],
     );
     updateConn.release();
 

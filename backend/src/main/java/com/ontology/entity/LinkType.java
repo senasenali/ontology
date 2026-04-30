@@ -25,6 +25,8 @@ public class LinkType {
     private String description;
     
     private String industryId;
+
+    private String projectId;
     
     private String sourceColumn;
     

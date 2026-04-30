@@ -25,6 +25,8 @@ public class ObjectType {
     private String backingDataset;
     
     private String industryId;
+
+    private String projectId;
     
     private LocalDateTime createdAt;
     

@@ -22,6 +22,8 @@ public class OntologyInterface {
 
     private String industryId;
 
+    private String projectId;
+
     private String status;
 
     private LocalDateTime createdAt;

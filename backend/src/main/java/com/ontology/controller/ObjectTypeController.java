@@ -30,19 +30,21 @@ public class ObjectTypeController {
 
     @PostMapping
     @Transactional
-    public Map<String, Object> create(@RequestBody ObjectType objectType) {
+    public Map<String, Object> create(@RequestBody ObjectType objectType, @RequestParam(required = false) String projectId) {
+        objectType.setProjectId(com.ontology.project.ProjectScope.normalize(projectId));
         objectType.setStatus("pending"); // 新建对象类型默认待审核
         objectTypeMapper.insert(objectType);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(objectType.getProjectId()));
         return result;
     }
 
     @PutMapping("/{id}")
     @Transactional
-    public Map<String, Object> update(@PathVariable String id, @RequestBody ObjectType objectType) {
+    public Map<String, Object> update(@PathVariable String id, @RequestBody ObjectType objectType, @RequestParam(required = false) String projectId) {
         objectType.setId(id);
+        objectType.setProjectId(com.ontology.project.ProjectScope.normalize(projectId));
         objectTypeMapper.updateById(objectType);
         ObjectType updated = objectTypeMapper.selectById(id);
         if (updated != null && "active".equalsIgnoreCase(updated.getStatus())) {
@@ -50,25 +52,28 @@ public class ObjectTypeController {
         }
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(objectType.getProjectId()));
         return result;
     }
 
     @DeleteMapping("/{id}")
     @Transactional
-    public Map<String, Object> delete(@PathVariable String id) {
+    public Map<String, Object> delete(@PathVariable String id, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         ruleTemplateService.deleteObjectTypeRuleArtifacts(id);
         objectTypeMapper.deleteById(id);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(projectId));
         return result;
     }
 
     @PostMapping("/{objectTypeId}/properties")
     @Transactional
-    public Map<String, Object> addProperty(@PathVariable String objectTypeId, @RequestBody Property property) {
+    public Map<String, Object> addProperty(@PathVariable String objectTypeId, @RequestBody Property property, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         property.setObjectTypeId(objectTypeId);
+        property.setProjectId(projectId);
         propertyMapper.insert(property);
         ObjectType objectType = objectTypeMapper.selectById(objectTypeId);
         if (objectType != null && "active".equalsIgnoreCase(objectType.getStatus())) {
@@ -76,13 +81,14 @@ public class ObjectTypeController {
         }
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(projectId));
         return result;
     }
 
     @DeleteMapping("/{objectTypeId}/properties/{propId}")
     @Transactional
-    public Map<String, Object> deleteProperty(@PathVariable String objectTypeId, @PathVariable String propId) {
+    public Map<String, Object> deleteProperty(@PathVariable String objectTypeId, @PathVariable String propId, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         propertyMapper.deleteById(propId);
         ObjectType objectType = objectTypeMapper.selectById(objectTypeId);
         if (objectType != null && "active".equalsIgnoreCase(objectType.getStatus())) {
@@ -90,15 +96,17 @@ public class ObjectTypeController {
         }
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(projectId));
         return result;
     }
 
     @PutMapping("/{objectTypeId}/properties/{propId}")
     @Transactional
-    public Map<String, Object> updateProperty(@PathVariable String objectTypeId, @PathVariable String propId, @RequestBody Property property) {
+    public Map<String, Object> updateProperty(@PathVariable String objectTypeId, @PathVariable String propId, @RequestBody Property property, @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         property.setId(propId);
         property.setObjectTypeId(objectTypeId);
+        property.setProjectId(projectId);
         propertyMapper.updateById(property);
         ObjectType objectType = objectTypeMapper.selectById(objectTypeId);
         if (objectType != null && "active".equalsIgnoreCase(objectType.getStatus())) {
@@ -106,15 +114,15 @@ public class ObjectTypeController {
         }
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(projectId));
         return result;
     }
 
     @GetMapping("/{objectTypeId}/interfaces")
-    public Map<String, Object> listImplementedInterfaces(@PathVariable String objectTypeId) {
+    public Map<String, Object> listImplementedInterfaces(@PathVariable String objectTypeId, @RequestParam(required = false) String projectId) {
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("interfaces", interfaceService.listObjectTypeInterfaceMappings(objectTypeId));
+        result.put("interfaces", interfaceService.listObjectTypeInterfaceMappings(objectTypeId, projectId));
         return result;
     }
 
@@ -122,11 +130,13 @@ public class ObjectTypeController {
     @Transactional
     public Map<String, Object> createImplementedInterface(
             @PathVariable String objectTypeId,
-            @RequestBody ObjectTypeInterfaceMapping mapping) {
-        interfaceService.saveObjectTypeInterfaceMapping(objectTypeId, mapping);
+            @RequestBody ObjectTypeInterfaceMapping mapping,
+            @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
+        interfaceService.saveObjectTypeInterfaceMapping(objectTypeId, mapping, projectId);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(projectId));
         return result;
     }
 
@@ -135,12 +145,14 @@ public class ObjectTypeController {
     public Map<String, Object> updateImplementedInterface(
             @PathVariable String objectTypeId,
             @PathVariable String mappingId,
-            @RequestBody ObjectTypeInterfaceMapping mapping) {
+            @RequestBody ObjectTypeInterfaceMapping mapping,
+            @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
         mapping.setId(mappingId);
-        interfaceService.saveObjectTypeInterfaceMapping(objectTypeId, mapping);
+        interfaceService.saveObjectTypeInterfaceMapping(objectTypeId, mapping, projectId);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(projectId));
         return result;
     }
 
@@ -148,11 +160,13 @@ public class ObjectTypeController {
     @Transactional
     public Map<String, Object> deleteImplementedInterface(
             @PathVariable String objectTypeId,
-            @PathVariable String mappingId) {
-        interfaceService.deleteObjectTypeInterfaceMapping(objectTypeId, mappingId);
+            @PathVariable String mappingId,
+            @RequestParam(required = false) String projectId) {
+        projectId = com.ontology.project.ProjectScope.normalize(projectId);
+        interfaceService.deleteObjectTypeInterfaceMapping(objectTypeId, mappingId, projectId);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("data", ontologyService.buildOntologyData());
+        result.put("data", ontologyService.buildOntologyData(projectId));
         return result;
     }
 }

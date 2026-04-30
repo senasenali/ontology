@@ -11,6 +11,6 @@ import java.util.List;
 @Mapper
 public interface InterfacePropertyMapper extends BaseMapper<InterfaceProperty> {
 
-    @Select("SELECT * FROM interface_properties WHERE interface_id = #{interfaceId} ORDER BY sort_order, name")
-    List<InterfaceProperty> selectByInterfaceId(@Param("interfaceId") String interfaceId);
+    @Select("SELECT * FROM interface_properties WHERE interface_id = #{interfaceId} AND project_id = #{projectId} ORDER BY sort_order, name")
+    List<InterfaceProperty> selectByInterfaceId(@Param("interfaceId") String interfaceId, @Param("projectId") String projectId);
 }

@@ -1336,7 +1336,7 @@ function EventInsightCard({ event }: { event: HotEventItem }) {
 }
 
 function HotEventInterpretationPanel() {
-  const [events, setEvents] = useState<HotEventItem[]>(MOCK_HOT_EVENTS);
+  const [events, setEvents] = useState<HotEventItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -1348,8 +1348,8 @@ function HotEventInterpretationPanel() {
     api
       .getTrackedEvents()
       .then((result) => {
-        if (!mounted || !result.events?.length) return;
-        const nextEvents = result.events.map((item: any) => ({
+        if (!mounted) return;
+        const nextEvents = (result.events || []).map((item: any) => ({
           id: item.id,
           title: item.title,
           category: item.category,
@@ -1367,9 +1367,7 @@ function HotEventInterpretationPanel() {
         setEvents(nextEvents);
         setSelectedId(nextEvents[0]?.id || null);
       })
-      .catch(() => {
-        // keep fallback data
-      })
+      .catch(() => {})
       .finally(() => {
         if (mounted) setLoading(false);
       });
@@ -1758,10 +1756,10 @@ export function OntologyQAPanel({ fallbackAgentId }: { fallbackAgentId?: string 
 }
 
 export function AgentStudio() {
-  const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
-  const [eventsByAgent, setEventsByAgent] = useState<Record<string, AgentEvent[]>>(MOCK_EVENTS);
-  const [analysesByAgent, setAnalysesByAgent] = useState<Record<string, AgentAnalysis[]>>(MOCK_ANALYSES);
-  const [selectedId, setSelectedId] = useState<string | null>(MOCK_AGENTS[0]?.id || null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [eventsByAgent, setEventsByAgent] = useState<Record<string, AgentEvent[]>>({});
+  const [analysesByAgent, setAnalysesByAgent] = useState<Record<string, AgentAnalysis[]>>({});
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [running, setRunning] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'events' | 'analyses'>('analyses');
@@ -1778,41 +1776,53 @@ export function AgentStudio() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadLithiumRuntimeData = async () => {
+    const loadAgents = async () => {
       try {
-        const [eventsResult, analysesResult] = await Promise.all([
-          api.getAgentEvents(DEMO_LITHIUM_AGENT_ID),
-          api.getAgentAnalyses(DEMO_LITHIUM_AGENT_ID),
-        ]);
+        const result = await api.getResearchAgents();
 
         if (cancelled) return;
 
-        const nextEvents = (eventsResult.events || []).map(mapBackendEvent);
-        const nextAnalyses = (analysesResult.analyses || []).map(mapBackendAnalysis);
+        const nextAgents = result.agents || [];
+        setAgents(nextAgents);
+        setSelectedId((prev) => (prev && nextAgents.some((agent: Agent) => agent.id === prev) ? prev : nextAgents[0]?.id || null));
 
-        if (nextEvents.length > 0) {
-          setEventsByAgent((prev) => ({ ...prev, [DEMO_LITHIUM_AGENT_ID]: nextEvents }));
-        }
+        const details = await Promise.all(
+          nextAgents.map(async (agent: Agent) => {
+            const [eventsResult, analysesResult] = await Promise.all([
+              api.getAgentEvents(agent.id),
+              api.getAgentAnalyses(agent.id),
+            ]);
 
-        if (nextAnalyses.length > 0) {
-          setAnalysesByAgent((prev) => ({ ...prev, [DEMO_LITHIUM_AGENT_ID]: nextAnalyses }));
-          const latestRunAt = nextAnalyses[0]?.created_at || nextEvents[0]?.created_at || null;
-          if (latestRunAt) {
-            setAgents((prev) =>
-              prev.map((agent) =>
-                agent.id === DEMO_LITHIUM_AGENT_ID
-                  ? { ...agent, last_run_at: latestRunAt, updated_at: latestRunAt }
-                  : agent,
-              ),
-            );
-          }
-        }
+            return {
+              agentId: agent.id,
+              events: (eventsResult.events || []).map(mapBackendEvent),
+              analyses: (analysesResult.analyses || []).map(mapBackendAnalysis),
+            };
+          }),
+        );
+
+        if (cancelled) return;
+
+        const nextEventsByAgent: Record<string, AgentEvent[]> = {};
+        const nextAnalysesByAgent: Record<string, AgentAnalysis[]> = {};
+        details.forEach(({ agentId, events, analyses }) => {
+          nextEventsByAgent[agentId] = events;
+          nextAnalysesByAgent[agentId] = analyses;
+        });
+
+        setEventsByAgent(nextEventsByAgent);
+        setAnalysesByAgent(nextAnalysesByAgent);
       } catch {
-        // keep demo fallback
+        if (!cancelled) {
+          setAgents([]);
+          setSelectedId(null);
+          setEventsByAgent({});
+          setAnalysesByAgent({});
+        }
       }
     };
 
-    loadLithiumRuntimeData();
+    loadAgents();
 
     return () => {
       cancelled = true;
@@ -1864,33 +1874,28 @@ export function AgentStudio() {
         setAnalysesByAgent((prev) => ({ ...prev, [agentId]: nextAnalyses }));
         toast.success('数据已刷新');
       } else {
-        await wait(5000);
-        const agent = agents.find((item) => item.id === agentId) || null;
-        const shouldSeedDemo = agent && (eventsByAgent[agentId] || []).length === 0 && (analysesByAgent[agentId] || []).length === 0;
-        const starterEvent = shouldSeedDemo && agent ? createStarterEvent(agent) : null;
-        const starterAnalysis = shouldSeedDemo && agent && starterEvent ? createStarterAnalysis(agent, starterEvent) : null;
+        await api.runResearchAgent(agentId);
+        const [eventsResult, analysesResult] = await Promise.all([
+          api.getAgentEvents(agentId),
+          api.getAgentAnalyses(agentId),
+        ]);
+        const nextEvents = (eventsResult.events || []).map(mapBackendEvent);
+        const nextAnalyses = (analysesResult.analyses || []).map(mapBackendAnalysis);
+        const latestRunAt = nextAnalyses[0]?.created_at || nextEvents[0]?.created_at || formatDateTime(new Date());
 
         setAgents((prev) =>
           prev.map((agent) =>
             agent.id === agentId
               ? {
                   ...agent,
-                  last_run_at: formatDateTime(new Date()),
-                  updated_at: formatDateTime(new Date()),
+                  last_run_at: latestRunAt,
+                  updated_at: latestRunAt,
                 }
               : agent,
           ),
         );
-
-        setEventsByAgent((prev) => {
-          if (!starterEvent) return prev;
-          return { ...prev, [agentId]: [starterEvent] };
-        });
-
-        setAnalysesByAgent((prev) => {
-          if (!starterAnalysis) return prev;
-          return { ...prev, [agentId]: [starterAnalysis] };
-        });
+        setEventsByAgent((prev) => ({ ...prev, [agentId]: nextEvents }));
+        setAnalysesByAgent((prev) => ({ ...prev, [agentId]: nextAnalyses }));
 
         toast.success('数据已刷新');
       }

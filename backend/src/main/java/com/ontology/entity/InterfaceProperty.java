@@ -25,6 +25,8 @@ public class InterfaceProperty {
 
     private Integer sortOrder;
 
+    private String projectId;
+
     @TableField(exist = false)
     private Boolean inherited;
 

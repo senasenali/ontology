@@ -27,6 +27,8 @@ public class OntologyRule {
     private String interfaceUrl;
     
     private String functionDescription;
+
+    private String projectId;
     
     private LocalDateTime createdAt;
     

@@ -2,6 +2,7 @@ package com.ontology.service;
 
 import com.ontology.entity.*;
 import com.ontology.mapper.*;
+import com.ontology.project.ProjectScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -21,23 +22,24 @@ public class OntologyService {
     private final IndustryCategoryMapper industryCategoryMapper;
     private final InterfaceService interfaceService;
     
-    public Map<String, Object> buildOntologyData() {
+    public Map<String, Object> buildOntologyData(String projectId) {
+        projectId = ProjectScope.normalize(projectId);
         Map<String, Object> result = new HashMap<>();
         
         // Object Types with Properties
-        List<ObjectType> objectTypes = objectTypeMapper.selectAllOrdered();
+        List<ObjectType> objectTypes = objectTypeMapper.selectAllOrdered(projectId);
         for (ObjectType ot : objectTypes) {
-            ot.setProperties(propertyMapper.selectByObjectTypeId(ot.getId()));
-            ot.setImplementedInterfaces(interfaceService.listObjectTypeInterfaceMappings(ot.getId()));
+            ot.setProperties(propertyMapper.selectByObjectTypeId(ot.getId(), projectId));
+            ot.setImplementedInterfaces(interfaceService.listObjectTypeInterfaceMappings(ot.getId(), projectId));
         }
         result.put("objectTypes", objectTypes);
         
         // Link Types
-        List<LinkType> linkTypes = linkTypeMapper.selectAllOrdered();
+        List<LinkType> linkTypes = linkTypeMapper.selectAllOrdered(projectId);
         result.put("linkTypes", linkTypes);
         
         // Action Types with Rules and Effects
-        List<ActionType> actionTypes = actionTypeMapper.selectAllActive();
+        List<ActionType> actionTypes = actionTypeMapper.selectAllActive(projectId);
         for (ActionType at : actionTypes) {
             at.setRules(actionRuleMapper.selectByActionTypeId(at.getId()));
             at.setEffects(actionEffectMapper.selectByActionTypeId(at.getId()));
@@ -45,7 +47,7 @@ public class OntologyService {
         result.put("actionTypes", actionTypes);
 
         // Interfaces
-        result.put("interfaces", interfaceService.listOntologyInterfaces());
+        result.put("interfaces", interfaceService.listOntologyInterfaces(projectId));
         
         return result;
     }

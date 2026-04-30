@@ -19,6 +19,8 @@ public class InterfacePropertyMapping {
 
     private String propertyId;
 
+    private String projectId;
+
     @TableField(exist = false)
     private String interfacePropertyName;
 

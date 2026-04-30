@@ -27,6 +27,8 @@ public class AgentAnalysis {
     private String impactChain;
     
     private String recommendation;
+
+    private String projectId;
     
     private LocalDateTime createdAt;
 }
